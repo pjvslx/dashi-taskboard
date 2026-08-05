@@ -12,7 +12,8 @@
   "scripts": {
     "codex": "node scripts/codex-injector.mjs --launch --watch --open",
     "codex:inject": "node scripts/codex-injector.mjs --watch",
-    "codex:daemon": "node scripts/codex-injector.mjs --daemon --open",
+    "precodex:daemon": "node scripts/ensure-web-build.mjs",
+    "codex:daemon": "node --no-warnings scripts/codex-injector.mjs --daemon --open",
     "codex:refresh": "node scripts/codex-injector.mjs --refresh",
     "dev": "node scripts/dev.mjs",
     "dev:server": "node --watch server/index.mjs --dev",

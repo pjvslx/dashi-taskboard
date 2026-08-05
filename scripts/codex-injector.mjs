@@ -396,10 +396,24 @@ function processCwd(pid) {
 }
 
 function residentInjectorPids(port) {
-  const processes = spawnSync("/bin/ps", ["-axo", "pid=,command="], {
-    encoding: "utf8",
-    maxBuffer: 4 * 1024 * 1024,
-  });
+  const processes = process.platform === "win32"
+    ? spawnSync("powershell.exe", [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ErrorActionPreference = 'SilentlyContinue'; "
+          + "Get-CimInstance Win32_Process "
+          + "| Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*codex-injector.mjs*' } "
+          + "| ForEach-Object { '{0} {1}' -f $_.ProcessId, $_.CommandLine }",
+      ], {
+        encoding: "utf8",
+        maxBuffer: 4 * 1024 * 1024,
+      })
+    : spawnSync("/bin/ps", ["-axo", "pid=,command="], {
+        encoding: "utf8",
+        maxBuffer: 4 * 1024 * 1024,
+      });
   if (processes.status !== 0) return [];
   return findResidentInjectorPids({
     processList: processes.stdout,
@@ -420,7 +434,7 @@ function startResidentInjector(
 ) {
   const [existingPid] = residentInjectorPids(port);
   if (existingPid) return { pid: existingPid, started: false };
-  const args = [injectorPath, "--watch", "--port", String(port)];
+  const args = ["--no-warnings", injectorPath, "--watch", "--port", String(port)];
   if (shouldOpen) args.push("--open");
   if (attachExisting) args.push("--attach-existing");
   if (startupToken) args.push("--startup-token", startupToken);
