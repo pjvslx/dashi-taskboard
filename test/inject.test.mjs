@@ -249,7 +249,7 @@ test("issues open an unsent native Codex composer in the exact workspace with a 
   assert.doesNotMatch(webApp, /taskboard:thread-created/);
   assert.match(
     webApp,
-    /const instruction = `e-taskboard Addressing the issues mentioned in \$\{task\.identifier\}`/,
+    /const instruction = `e-taskboard Addressing the issues mentioned in \$\{task\.identifier\}\\n\\n请使用中文回复。`/,
   );
   assert.match(
     webApp,

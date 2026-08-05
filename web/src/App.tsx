@@ -1768,7 +1768,7 @@ export function App() {
       ?? selectedProject?.workspacePath
       ?? developmentScan.workspacePath
       ?? hostContext?.workspacePath;
-    const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}`;
+    const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}\n\n请使用中文回复。`;
     const prompt = `[$manage-taskboard](${manageTaskboardSkillPath}) ${instruction}`;
 
     if (!embedded || window.parent === window) {
