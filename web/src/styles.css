@@ -3892,6 +3892,26 @@ kbd {
   font-size: 10px;
 }
 
+.comment-reopen-prompt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border: var(--border-hairline) solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+  font-size: 12px;
+}
+
+.comment-reopen-prompt > div {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .comment-composer {
   margin: 18px 0 0;
   overflow: hidden;

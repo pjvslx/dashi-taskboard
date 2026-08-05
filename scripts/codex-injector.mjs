@@ -2,6 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -24,6 +25,7 @@ const projectRoot = path.resolve(path.dirname(injectorPath), "..");
 const defaultCodexDebuggingPort = 9229;
 const injectionPath = path.join(projectRoot, "inject", "codex-taskboard.user.js");
 const automationPoliciesPath = path.join(projectRoot, ".data", "codex-automation-policies.json");
+const injectorLogPath = path.join(projectRoot, ".data", "logs", "codex-injector.log");
 const taskboardOrigin = `http://127.0.0.1:${resolvePort()}`;
 const taskboardHealthUrl = `${taskboardOrigin}/health`;
 const taskboardPageUrl = `${taskboardOrigin}/?host=codex`;
@@ -45,6 +47,52 @@ const quotaPolicyQueues = new Map();
 let quotaPoliciesLoadPromise = null;
 let quotaPoliciesWritePromise = Promise.resolve();
 let quotaPoliciesRestored = false;
+
+function diagnosticText(value) {
+  if (value instanceof Error) return value.stack || value.message;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function writeInjectorDiagnostic(label, detail = "") {
+  try {
+    mkdirSync(path.dirname(injectorLogPath), { recursive: true });
+    appendFileSync(
+      injectorLogPath,
+      `[${new Date().toISOString()}] ${label}${detail ? `\n${diagnosticText(detail)}` : ""}\n`,
+    );
+  } catch (_) {}
+}
+
+process.on("uncaughtExceptionMonitor", (error) => {
+  writeInjectorDiagnostic("uncaughtException", error);
+});
+process.on("unhandledRejection", (reason) => {
+  writeInjectorDiagnostic("unhandledRejection", reason);
+});
+process.on("warning", (warning) => {
+  writeInjectorDiagnostic("warning", warning);
+});
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    writeInjectorDiagnostic("signal", signal);
+  });
+}
+process.on("exit", (code) => {
+  writeInjectorDiagnostic("exit", `code=${code}`);
+});
+
+function startInjectorHeartbeat(getDetail) {
+  const timer = setInterval(() => {
+    writeInjectorDiagnostic("heartbeat", getDetail());
+  }, 30_000);
+  timer.unref();
+  return timer;
+}
 
 function parseArgs(argv) {
   const options = {
@@ -151,9 +199,11 @@ function createTaskboardSupervisor({ detached }) {
       child = started;
       if (detached) started.unref();
       started.once("error", (error) => {
+        writeInjectorDiagnostic("taskboard-child-error", error);
         if (!stopping) console.error(`Taskboard process error: ${error.message}`);
       });
       started.once("exit", (code, signal) => {
+        writeInjectorDiagnostic("taskboard-child-exit", `code=${code ?? ""} signal=${signal ?? ""}`);
         if (child === started) child = null;
         if (!stopping && !detached && code !== 0) {
           console.error(`Taskboard exited (${signal || code}); it will be restarted automatically.`);
@@ -443,6 +493,17 @@ async function restartResidentInjectorForRefresh(port) {
       waitForResidentInjectorReady(targetPort, pid, startupToken, sourceHash)
     ),
   });
+}
+
+async function startResidentInjectorForDaemon(port, options) {
+  const { sourceHash } = await currentInjectionSource();
+  for (const pid of residentInjectorPids(port)) {
+    await stopResidentInjector(pid);
+  }
+  const startupToken = randomUUID();
+  const launcher = startResidentInjector(port, options.open, options.attachExisting, startupToken);
+  await waitForResidentInjectorReady(port, launcher.pid, startupToken, sourceHash);
+  return launcher;
 }
 
 async function refreshTaskboardFrames(port) {
@@ -1215,6 +1276,46 @@ async function injectAll(
   return results;
 }
 
+async function waitForInitialInjection({
+  port,
+  source,
+  sourceHash,
+  shouldOpen,
+  screenshotPath,
+  injectedTargets,
+  keepAlive,
+  supervisor,
+  attachExisting,
+  startupToken,
+  codexProcess,
+}) {
+  while (true) {
+    try {
+      return await injectAll(
+        port,
+        source,
+        sourceHash,
+        shouldOpen,
+        screenshotPath,
+        injectedTargets,
+        keepAlive,
+        supervisor,
+        attachExisting,
+        startupToken,
+      );
+    } catch (error) {
+      if (!keepAlive || (codexProcess && codexProcess.exitCode !== null)) throw error;
+      console.error(`Waiting for Codex renderer: ${error.message}`);
+      try {
+        await supervisor.ensure();
+      } catch (serviceError) {
+        console.error(`Waiting for Taskboard service: ${serviceError.message}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+  }
+}
+
 async function currentInjectionSource() {
   const userScript = await readFile(injectionPath, "utf8");
   const runtimeSource = `window.__CODEX_TASKBOARD_MANAGED_ORIGIN__ = ${JSON.stringify(taskboardOrigin)};
@@ -1233,6 +1334,10 @@ ${runtimeSource}`,
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const cdpVersionUrl = `http://${cdpHost}:${options.port}/json/version`;
+  writeInjectorDiagnostic(
+    "start",
+    `pid=${process.pid} argv=${process.argv.slice(2).join(" ") || "(none)"}`,
+  );
 
   if (options.daemon) {
     let port = options.port;
@@ -1248,7 +1353,10 @@ async function main() {
       if (!activePort) throw new Error("No debuggable Codex window found");
       port = activePort;
     }
-    console.log(JSON.stringify({ launcher: startResidentInjector(port, options.open), port }, null, 2));
+    console.log(JSON.stringify({
+      launcher: await startResidentInjectorForDaemon(port, options),
+      port,
+    }, null, 2));
     return;
   }
 
@@ -1299,21 +1407,28 @@ async function main() {
 
     const { source, sourceHash } = await currentInjectionSource();
     const injectedTargets = new Map();
-    const firstResults = await injectAll(
-      options.port,
+    const heartbeat = options.watch
+      ? startInjectorHeartbeat(() => (
+          `pid=${process.pid} port=${options.port} targets=${injectedTargets.size} taskboard=${taskboardHealthUrl}`
+        ))
+      : null;
+    const firstResults = await waitForInitialInjection({
+      port: options.port,
       source,
       sourceHash,
-      options.open,
-      options.screenshot,
+      shouldOpen: options.open,
+      screenshotPath: options.screenshot,
       injectedTargets,
-      options.watch,
+      keepAlive: options.watch,
       supervisor,
-      options.attachExisting,
-      options.startupToken,
-    );
+      attachExisting: options.attachExisting,
+      startupToken: options.startupToken,
+      codexProcess,
+    });
     console.log(JSON.stringify({ injected: firstResults }, null, 2));
 
     if (!options.watch) {
+      if (heartbeat) clearInterval(heartbeat);
       codexProcess?.unref();
       return;
     }
@@ -1325,6 +1440,7 @@ async function main() {
     };
     process.once("SIGINT", stop);
     process.once("SIGTERM", stop);
+    process.once("SIGHUP", stop);
 
     while (true) {
       await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -1357,6 +1473,7 @@ async function main() {
         console.error(`Waiting for Codex renderer: ${error.message}`);
       }
     }
+    if (heartbeat) clearInterval(heartbeat);
     supervisor.stop();
   } catch (error) {
     supervisor.stop();
@@ -1365,6 +1482,7 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error.message);
+  writeInjectorDiagnostic("fatal", error);
+  console.error(error.stack || error.message);
   process.exitCode = 1;
 });

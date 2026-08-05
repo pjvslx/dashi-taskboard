@@ -3,6 +3,10 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 const source = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
+const launcherSource = await readFile(
+  new URL("../start-codex-taskboard.bat", import.meta.url),
+  "utf8",
+);
 const runtimeSource = await readFile(
   new URL("../scripts/codex-injector-runtime.mjs", import.meta.url),
   "utf8",
@@ -73,6 +77,15 @@ test("the package injection command remains resident for tab-triggered recovery"
   assert.match(source, /__codexTaskboardHostStartupTokenV1/);
 });
 
+test("the Windows launcher starts a detached resident injector instead of a foreground watcher", () => {
+  assert.match(launcherSource, /npm run codex:daemon -- --port %PORT% --attach-existing/);
+  assert.doesNotMatch(launcherSource, /npm run codex:inject -- --port %PORT% --open --attach-existing/);
+  assert.match(source, /async function startResidentInjectorForDaemon/);
+  assert.match(source, /startResidentInjector\(port, options\.open, options\.attachExisting, startupToken\)/);
+  assert.match(source, /await waitForResidentInjectorReady\(port, launcher\.pid, startupToken, sourceHash\)/);
+  assert.match(source, /startResidentInjectorForDaemon\(port, options\)/);
+});
+
 test("attach reconciles the renderer against a hashed current injection source", () => {
   assert.match(source, /createHash\("sha256"\)/);
   assert.match(source, /__CODEX_TASKBOARD_SOURCE_HASH__/);
@@ -83,6 +96,31 @@ test("attach reconciles the renderer against a hashed current injection source",
   assert.match(source, /Page\.addScriptToEvaluateOnNewDocument/);
   assert.match(source, /reconcileInjectionRuntime/);
   assert.match(source, /expectedSourceHash/);
+});
+
+test("watch mode waits through startup renderer gaps and logs injector output", () => {
+  assert.match(source, /async function waitForInitialInjection/);
+  assert.match(source, /Waiting for Codex renderer: \$\{error\.message\}/);
+  assert.match(source, /await waitForInitialInjection\(/);
+  assert.doesNotMatch(source, /const firstResults = await injectAll\(/);
+  assert.match(launcherSource, /2>\s*&1/);
+  assert.match(launcherSource, /tee/i);
+  assert.match(launcherSource, /injector output appended/i);
+});
+
+test("injector records exit diagnostics before returning code 1", () => {
+  assert.match(source, /const injectorLogPath = path\.join\(projectRoot, "\.data", "logs", "codex-injector\.log"\)/);
+  assert.match(source, /function writeInjectorDiagnostic/);
+  assert.match(source, /function startInjectorHeartbeat/);
+  assert.match(source, /writeInjectorDiagnostic\("heartbeat"/);
+  assert.match(source, /writeInjectorDiagnostic\("signal"/);
+  assert.match(source, /writeInjectorDiagnostic\("taskboard-child-exit"/);
+  assert.match(source, /writeInjectorDiagnostic\("taskboard-child-error"/);
+  assert.match(source, /process\.on\("uncaughtExceptionMonitor"/);
+  assert.match(source, /process\.on\("unhandledRejection"/);
+  assert.match(source, /process\.on\("exit"/);
+  assert.match(source, /writeInjectorDiagnostic\("fatal", error\)/);
+  assert.match(source, /console\.error\(error\.stack \|\| error\.message\)/);
 });
 
 test("attach-existing honors an explicit open request even when the old page was closed", () => {

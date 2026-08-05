@@ -163,9 +163,9 @@ echo Restarting local Taskboard service if it is already running...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$pids = @(Get-NetTCPConnection -LocalPort 47823 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($processId in $pids) { if ($processId -and $processId -ne $PID) { try { Stop-Process -Id $processId -Force -ErrorAction Stop; Add-Content -Path '%LOG_FILE%' -Value ('stopped Taskboard service PID=' + $processId) } catch { Add-Content -Path '%LOG_FILE%' -Value ('failed to stop Taskboard PID=' + $processId + ': ' + $_.Exception.Message) } } }"
 timeout /T 1 /NOBREAK >nul
 
-echo Injecting Taskboard panel into Codex...
+echo Starting resident Taskboard injector...
 set "CODEX_TASKBOARD_HOST=%TASKBOARD_HOST%"
-call npm run codex:inject -- --port %PORT% --open --attach-existing
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content -Path '%LOG_FILE%' -Value '--- injector output appended ---'; & cmd.exe /D /C \"npm run codex:daemon -- --port %PORT% --attach-existing\" 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append; exit $LASTEXITCODE"
 set "INJECT_EXIT=%ERRORLEVEL%"
 
 echo.
@@ -175,5 +175,5 @@ if not "%INJECT_EXIT%"=="0" (
   pause
   exit /b %INJECT_EXIT%
 )
-echo Injector stopped. Close this window only when you are done using the Taskboard panel.
+echo Resident injector is running in the background. You can close this window.
 pause

@@ -230,6 +230,7 @@ export function TaskDetail({
   const [savingCommentId, setSavingCommentId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Comment | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [reopenPromptVisible, setReopenPromptVisible] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const composerRef = useRef<InlineMediaComposerHandle>(null);
@@ -251,6 +252,7 @@ export function TaskDetail({
 
   useEffect(() => {
     setCurrentTask(task);
+    if (task.status !== "done") setReopenPromptVisible(false);
     if (document.activeElement !== titleRef.current) setTitle(task.title);
     if (document.activeElement !== descriptionRef.current) setDescription(task.description);
   }, [task]);
@@ -442,12 +444,18 @@ export function TaskDetail({
           ? "评论和附件已发布。"
           : "评论已发布。",
       );
+      if (currentTask.status === "done") setReopenPromptVisible(true);
       requestAnimationFrame(() => composerRef.current?.focus());
     } catch (error) {
       setCommentsError(messageFor(error));
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function reopenCompletedTaskAfterComment() {
+    const saved = await saveTask({ status: "todo" }, "status");
+    if (saved) setReopenPromptVisible(false);
   }
 
   function stageCommentFiles(files: FileList | File[]) {
@@ -901,6 +909,30 @@ export function TaskDetail({
               </div>
 
               {commentsError && <div className="comments-error" role="alert">{commentsError}</div>}
+
+              {reopenPromptVisible && currentTask.status === "done" && (
+                <div className="comment-reopen-prompt" role="status">
+                  <span>这个议题已经完成，需要重新打开继续处理吗？</span>
+                  <div>
+                    <button
+                      className="button primary"
+                      type="button"
+                      disabled={savingProperty === "status"}
+                      onClick={() => void reopenCompletedTaskAfterComment()}
+                    >
+                      重新打开
+                    </button>
+                    <button
+                      className="button secondary"
+                      type="button"
+                      disabled={savingProperty === "status"}
+                      onClick={() => setReopenPromptVisible(false)}
+                    >
+                      保持完成
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <form className="comment-composer" onSubmit={(event) => { event.preventDefault(); void submitComment(); }}>
                 <div className="composer-author">
