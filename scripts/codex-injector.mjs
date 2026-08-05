@@ -788,6 +788,29 @@ async function restoreQuotaPolicies(cdp) {
   }
 }
 
+async function focusComposerAfterSkillMention(cdp, executionContextId) {
+  const positioned = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const editor = Array.from(document.querySelectorAll(
+        '[data-codex-composer="true"][contenteditable="true"]'
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      if (!editor) return false;
+
+      editor.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    })()`,
+    contextId: executionContextId,
+    returnByValue: true,
+  });
+  return positioned.result.value === true;
+}
+
 async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
   const {
     instruction,
@@ -898,7 +921,10 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
     throw new Error(`Timed out while creating the ${skillDisplayName} Skill mention`);
   }
 
-  await cdp.send("Input.insertText", { text: instruction });
+  if (!(await focusComposerAfterSkillMention(cdp, executionContextId))) {
+    throw new Error("Codex composer disappeared before writing the issue instruction");
+  }
+  await cdp.send("Input.insertText", { text: ` ${instruction}` });
   while (Date.now() < deadline) {
     const verified = await cdp.send("Runtime.evaluate", {
       expression: `(() => {

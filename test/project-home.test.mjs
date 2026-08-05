@@ -14,6 +14,9 @@ test("the project home merges live Codex projects with persisted Taskboard proje
   assert.match(appSource, /hostContext\?\.projects \?\? \[\]/);
   assert.match(appSource, /persistedById/);
   assert.match(appSource, /const projectChoiceKey = \(project: Pick<ProjectChoice, "id" \| "name" \| "workspacePath"\>\) =>/);
+  assert.match(appSource, /function normalizedProjectName\(project: Pick<ProjectChoice, "id" \| "name">\)/);
+  assert.match(appSource, /function projectChoicesMatch\(left: ProjectChoice, right: ProjectChoice\)/);
+  assert.match(appSource, /normalizedProjectName\(left\) === normalizedProjectName\(right\)/);
   assert.match(appSource, /project\.persisted \|\| existing\.persisted/);
   assert.match(appSource, /issueCount: existing\.issueCount \+ project\.issueCount/);
   assert.match(appSource, /project\.inCodex \? "Codex 项目" : "已保存的项目"/);

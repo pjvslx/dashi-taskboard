@@ -273,6 +273,16 @@ const projectChoiceKey = (project: Pick<ProjectChoice, "id" | "name" | "workspac
     : `name:${project.name.trim().toLocaleLowerCase() || project.id}`
 );
 
+function normalizedProjectName(project: Pick<ProjectChoice, "id" | "name">) {
+  return project.name.trim().toLocaleLowerCase() || project.id;
+}
+
+function projectChoicesMatch(left: ProjectChoice, right: ProjectChoice) {
+  if (left.id === right.id) return true;
+  if (left.workspacePath && right.workspacePath) return projectChoiceKey(left) === projectChoiceKey(right);
+  return normalizedProjectName(left) === normalizedProjectName(right);
+}
+
 function readShowEmptyColumns(): boolean {
   return window.localStorage.getItem(SHOW_EMPTY_COLUMNS_KEY) === "true";
 }
@@ -706,8 +716,7 @@ export function App() {
     const seen = new Set<string>();
     const choices: ProjectChoice[] = [];
     const appendProjectChoice = (project: ProjectChoice) => {
-      const key = projectChoiceKey(project);
-      const existingIndex = choices.findIndex((choice) => projectChoiceKey(choice) === key);
+      const existingIndex = choices.findIndex((choice) => projectChoicesMatch(choice, project));
       if (existingIndex === -1) {
         choices.push(project);
         return;

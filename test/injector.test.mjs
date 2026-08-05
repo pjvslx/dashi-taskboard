@@ -32,7 +32,11 @@ test("the CDP bridge accepts only service ensure and native Skill composer prefi
   assert.match(source, /button\[data-list-navigation-item="true"\]/);
   assert.match(source, /\[skill-mention-name\]/);
   assert.match(source, /skill-mention-path/);
-  assert.match(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(source, /function focusComposerAfterSkillMention/);
+  assert.match(source, /range\.selectNodeContents\(editor\)/);
+  assert.match(source, /range\.collapse\(false\)/);
+  assert.match(source, /await focusComposerAfterSkillMention\(cdp, executionContextId\)/);
+  assert.match(source, /cdp\.send\("Input\.insertText", \{ text: ` \$\{instruction\}` \}\)/);
   assert.match(source, /Runtime\.bindingCalled/);
   assert.match(runtimeSource, /params\.executionContextId/);
   assert.match(source, /hostResponse/);
