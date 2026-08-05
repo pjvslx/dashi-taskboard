@@ -239,6 +239,15 @@ export function TaskDetail({
     || workflows.some((workflow) => workflow.id === currentTask.workflowId);
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
+  const linkedThreadId = currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
+
+  function openCurrentTaskInThread() {
+    if (linkedThreadId) {
+      onOpenThread(linkedThreadId);
+      return;
+    }
+    onOpenInThread(currentTask);
+  }
 
   useEffect(() => {
     setCurrentTask(task);
@@ -967,7 +976,7 @@ export function TaskDetail({
               className="detail-open-thread-action"
               type="button"
               disabled={openingThread}
-              onClick={() => onOpenInThread(currentTask)}
+              onClick={openCurrentTaskInThread}
             >
               <LinearIcon name="conversation" />
               <span>{openingThread ? "正在打开…" : "在对话中打开"}</span>

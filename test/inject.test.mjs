@@ -26,6 +26,7 @@ test("embedded page uses the local taskboard URL and supports a runtime override
   assert.match(source, /window\.__CODEX_TASKBOARD_URL__/);
   assert.match(source, /nextFrame\.src = taskboardUrl\.href/);
   assert.match(source, /frameOrigin = taskboardUrl\.origin/);
+  assert.match(webApp, /window\.parent !== window && typeof window\.__TASKBOARD_API_BASE__ === "string"/);
 });
 
 test("entry clones the native Plugins row and the page covers the complete Codex workspace", () => {
@@ -122,6 +123,16 @@ test("opening asks the resident launcher to ensure the service and rebuilds fail
   assert.match(source, /HOST_HEARTBEAT_MAX_AGE_MS/);
 });
 
+test("rendered blob iframes can become ready even when the ready message is missed", () => {
+  assert.match(source, /function markFrameReady\(\)/);
+  assert.match(source, /message\.type === "taskboard:ready"[\s\S]*?markFrameReady\(\)/);
+  assert.match(source, /function frameHasRenderedTaskboard\(expectedFrame\)/);
+  assert.match(source, /doc\?\.title === "Taskboard"/);
+  assert.match(source, /!text\.startsWith\("Loading Taskboard"\)/);
+  assert.match(source, /function probeRenderedFrameReady\(expectedFrame\)/);
+  assert.match(source, /probeRenderedFrameReady\(nextFrame\)/);
+});
+
 test("the injected iframe can be cache-busted without reloading the Codex shell", () => {
   assert.match(source, /const FRAME_REFRESH_PARAM = "__codex_taskboard_refresh"/);
   assert.match(source, /function reloadFrame\(\)/);
@@ -177,7 +188,7 @@ test("the iframe automation contract is forwarded through the fixed host binding
 test("complete App automation payloads cross the injected forwarder into the current parser", () => {
   const functionSource = source.slice(
     source.indexOf("function buildAutomationHostPayload"),
-    source.indexOf("\n\n  async function handleAutomationRequest"),
+    source.indexOf("async function handleAutomationRequest"),
   );
   assert.ok(functionSource.startsWith("function buildAutomationHostPayload"));
   const buildAutomationHostPayload = vm.runInNewContext(`(${functionSource})`);
@@ -189,6 +200,8 @@ test("complete App automation payloads cross the injected forwarder into the cur
     workspacePath: "/tmp/local-project",
     skillPath: "/tmp/manage-taskboard/SKILL.md",
     automationId: "automation-1",
+    enabledByUser: true,
+    quotaAware: true,
     intervalMinutes: 10,
     model: "gpt-5.6-sol",
     reasoningEffort: "ultra",
@@ -213,7 +226,7 @@ test("only a loopback Taskboard iframe can request native automation", () => {
   assert.match(source, /hostname === "127\.0\.0\.1" \|\| hostname === "localhost"/);
   assert.match(
     source,
-    /if \(!isLocalTaskboardOrigin\(frameOrigin\)\) \{\s*postToFrame\(\{\s*type: "taskboard:automation-response"/,
+    /if \(!isLocalTaskboardOrigin\(frameServiceOrigin \|\| frameOrigin\)\) \{\s*postToFrame\(\{\s*type: "taskboard:automation-response"/,
   );
 });
 
@@ -248,6 +261,11 @@ test("issues open an unsent native Codex composer in the exact workspace with a 
   assert.match(webApp, /instruction,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
   assert.match(webApp, /type: "taskboard:open-thread", payload: \{ threadId \}/);
+});
+
+test("opening an issue conversation reuses linked threads and persisted workspace paths", () => {
+  assert.match(webApp, /if \(task\.threadId\) \{\s*openThread\(task\.threadId\);\s*return;\s*\}/);
+  assert.match(webApp, /\?\? selectedProject\?\.workspacePath/);
 });
 
 test("the standalone web page opens linked Codex tasks through the app deep link", () => {

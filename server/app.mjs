@@ -81,6 +81,19 @@ function sendEmpty(response, status, headers = {}) {
   response.end();
 }
 
+function applyCorsHeaders(request, response) {
+  const origin = request.headers.origin;
+  if (!TRUSTED_EMBED_ORIGINS.has(origin)) return;
+  response.setHeader("access-control-allow-origin", origin);
+  response.setHeader("access-control-allow-methods", "GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS");
+  response.setHeader(
+    "access-control-allow-headers",
+    "content-type,x-taskboard-user-id,x-taskboard-user-name,x-taskboard-user-avatar,x-taskboard-filename",
+  );
+  response.setHeader("access-control-allow-private-network", "true");
+  response.setHeader("access-control-max-age", "600");
+}
+
 function toFetchRequest(request) {
   const headers = new Headers();
   for (const [name, value] of Object.entries(request.headers)) {
@@ -1268,6 +1281,12 @@ async function discoverWorkflowCapabilities(resolved, workspacePath) {
   return { skills, mcpServers };
 }
 
+function normalizeCodexExecutable(value) {
+  const executable = typeof value === "string" && value.trim() ? value.trim() : "codex";
+  if (executable === "codex" || path.extname(executable)) return executable;
+  return path.join(executable, process.platform === "win32" ? "codex.exe" : "codex");
+}
+
 export function resolveServerOptions(options = {}) {
   const configuredDataDirectory = options.dataDirectory ?? process.env.CODEX_TASKBOARD_DATA_DIR;
   const dataDirectory = configuredDataDirectory
@@ -1281,7 +1300,7 @@ export function resolveServerOptions(options = {}) {
     cloudConfigPath: options.cloudConfigPath ?? path.join(dataDirectory, "cloud-companion.json"),
     staticDirectory: options.staticDirectory ?? path.join(PROJECT_ROOT, "dist", "web"),
     skillPath: options.skillPath ?? path.join(PROJECT_ROOT, "skills", "manage-taskboard", "SKILL.md"),
-    codexExecutable: options.codexExecutable ?? process.env.CODEX_EXECUTABLE ?? "codex",
+    codexExecutable: normalizeCodexExecutable(options.codexExecutable ?? process.env.CODEX_EXECUTABLE),
     codexStatePath: options.codexStatePath
       ?? path.join(codexHome, ".codex-global-state.json"),
     codexProcessesPath: options.codexProcessesPath
@@ -1337,8 +1356,10 @@ export function createTaskboardServer(options = {}) {
   const server = createServer(async (request, response) => {
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("referrer-policy", "no-referrer");
+    applyCorsHeaders(request, response);
     try {
       assertTrustedNetworkRequest(request);
+      if (request.method === "OPTIONS") return sendEmpty(response, 204);
       const url = new URL(request.url, "http://127.0.0.1");
       const pathname = url.pathname;
       const isLocalAiRoute = pathname === "/api/local/ai" || pathname.startsWith("/api/local/ai/");
@@ -1599,6 +1620,32 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 201, { project });
         }
         return methodNotAllowed(response, ["GET", "POST"]);
+      }
+
+      const projectRoute = pathname.match(/^\/api\/projects\/([^/]+)$/);
+      if (projectRoute) {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Project routes do not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(projectRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_PATH", "Project id contains invalid encoding");
+        }
+        validateProjectId(projectId);
+        if (request.method !== "DELETE") return methodNotAllowed(response, ["DELETE"]);
+        await assertEmptyRequestBody(request, "DELETE /api/projects/:id");
+        const deleted = database.deleteProject(projectId);
+        for (const attachment of deleted.attachments) {
+          try {
+            await unlink(path.join(resolved.attachmentsDirectory, attachment.id));
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
+          }
+        }
+        events.emit("project.deleted", { project: deleted.project });
+        return sendEmpty(response, 204);
       }
 
       const workflowWorkspaceRoute = pathname.match(/^\/api\/projects\/([^/]+)\/workflow-workspace$/);

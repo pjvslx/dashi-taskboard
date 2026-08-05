@@ -81,8 +81,16 @@ test("attach reconciles the renderer against a hashed current injection source",
   assert.match(source, /expectedSourceHash/);
 });
 
+test("attach-existing honors an explicit open request even when the old page was closed", () => {
+  assert.match(source, /const shouldShowTaskboard = shouldOpen \|\| reconciled\.shouldRemainOpen/);
+  assert.match(source, /if \(shouldOpen && !reconciled\.shouldRemainOpen\)/);
+  assert.match(source, /expression: "window\.__codexTaskboardInjection__\?\.open\(\)"/);
+  assert.match(source, /waitForInjectionStatus\(\s*cdp,\s*shouldShowTaskboard,/);
+});
+
 test("the injector ignores auxiliary Codex windows", () => {
   assert.match(source, /!target\.url\?\.includes\("initialRoute=%2Fglobal-dictation"\)/);
+  assert.match(source, /!target\.url\?\.includes\("initialRoute=%2Favatar-overlay"\)/);
 });
 
 test("a completed web build refreshes an already-open Codex iframe", () => {

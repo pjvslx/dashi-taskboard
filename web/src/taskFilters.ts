@@ -5,6 +5,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "./types";
+import { safeReplaceHistoryState } from "./safeHistory";
 
 export type TaskLinkFilter = "all" | "linked" | "unlinked";
 export type TaskFilterKey = "statuses" | "priorities" | "labels" | "link" | "content";
@@ -67,7 +68,7 @@ export function writeTaskFilters(filters: TaskFilters) {
   if (filters.content.trim()) url.searchParams.set("content", filters.content.trim());
   else url.searchParams.delete("content");
 
-  window.history.replaceState(null, "", url);
+  safeReplaceHistoryState(null, "", url);
 }
 
 export function taskFilterCount(filters: TaskFilters): number {

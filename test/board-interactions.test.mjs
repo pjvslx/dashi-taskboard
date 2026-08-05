@@ -107,6 +107,7 @@ test("review, blocked and canceled statuses round-trip through filter URLs", () 
   assert.match(filterSource, /filters\.statuses\.join\(","\)/);
   assert.match(filterSource, /\.split\(","\)\.filter\(isTaskStatus\)/);
   assert.match(filterSource, /TASK_STATUSES\.includes\(value as TaskStatus\)/);
+  assert.match(filterSource, /safeReplaceHistoryState\(null, "", url\)/);
 });
 
 test("the column surface wraps its heading and issue list", () => {
@@ -130,7 +131,11 @@ test("common issue mutations enter a Linear-style undo queue", () => {
 
 test("issues expose processing conversations without manual binding", () => {
   assert.match(detailSource, /在对话中打开/);
+  assert.match(detailSource, /const linkedThreadId = currentTask\.threadId \?\? comments\.find\(\(comment\) => comment\.threadId\)\?\.threadId \?\? null/);
+  assert.match(detailSource, /function openCurrentTaskInThread\(\)/);
+  assert.match(detailSource, /if \(linkedThreadId\) \{\s*onOpenThread\(linkedThreadId\);\s*return;\s*\}/);
   assert.match(detailSource, /onOpenInThread\(currentTask\)/);
+  assert.match(detailSource, /onClick=\{openCurrentTaskInThread\}/);
   assert.doesNotMatch(appSource, /detail-thread-button/);
   assert.doesNotMatch(detailSource, /输入对话 ID|解除 Codex 对话绑定|>绑定</);
   assert.doesNotMatch(editorSource, /对话 ID|linkedThreadId/);

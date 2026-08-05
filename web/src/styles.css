@@ -539,6 +539,7 @@ kbd {
 }
 
 .project-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -564,7 +565,7 @@ kbd {
   width: 100%;
   min-width: 0;
   gap: 11px;
-  padding: 12px 13px 9px;
+  padding: 12px 42px 9px 13px;
   border: 0;
   background: transparent;
   color: inherit;
@@ -574,6 +575,44 @@ kbd {
 .project-card-open:disabled {
   cursor: wait;
   opacity: 0.68;
+}
+
+.project-card-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.project-card:hover .project-card-delete,
+.project-card:focus-within .project-card-delete {
+  opacity: 1;
+}
+
+.project-card-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.project-card-delete:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.project-card-delete svg {
+  width: 13px;
+  height: 13px;
 }
 
 .project-card-directory {
@@ -3407,6 +3446,8 @@ kbd {
   margin: 0;
   color: var(--text-secondary);
   font-size: 12px;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .activity-entry p strong {
@@ -3494,6 +3535,8 @@ kbd {
   border-radius: 8px;
   background: var(--surface);
   box-shadow: var(--card-shadow);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .comment-header {
@@ -3502,6 +3545,8 @@ kbd {
   min-height: 20px;
   gap: 6px;
   padding: 14px 14px 0 16px;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .comment-header .comment-avatar {
@@ -3547,6 +3592,8 @@ kbd {
   margin-left: auto;
   opacity: 0;
   transition: opacity 100ms ease;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .comment-card:hover .comment-actions,
@@ -3632,10 +3679,19 @@ kbd {
   font-size: 15px;
   line-height: 24px;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .comment-body .issue-description-document {
   display: block;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.comment-body .issue-description-document * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .comment-body .issue-description-document p,
@@ -6876,6 +6932,8 @@ kbd {
   overflow: auto;
   overscroll-behavior: contain;
   scroll-behavior: smooth;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .ai-chat-user-message {
@@ -6886,6 +6944,8 @@ kbd {
   border-radius: 20px;
   background: color-mix(in srgb, var(--text-primary) 5%, transparent);
   color: var(--text-primary);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .ai-chat-skill-reference {
@@ -6912,6 +6972,8 @@ kbd {
 .ai-chat-assistant-message {
   width: 100%;
   color: var(--text-primary);
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .ai-chat-markdown {

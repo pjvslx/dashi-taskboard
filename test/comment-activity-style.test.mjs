@@ -28,8 +28,19 @@ test("comment body renders document formatting at Linear typography", () => {
   assert.match(styles, /\.comment-body \.issue-description-document\s*\{/);
 });
 
+test("activity comments allow mouse text selection inside agent replies", () => {
+  assert.match(styles, /body\s*\{[^}]*user-select:\s*none;/s);
+  assert.match(styles, /\.activity-entry p\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(styles, /\.comment-card\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(styles, /\.comment-header\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(styles, /\.comment-actions\s*\{[^}]*user-select:\s*none;/s);
+  assert.match(styles, /\.comment-body\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(styles, /\.comment-body \.issue-description-document\s*\{[^}]*user-select:\s*text;/s);
+  assert.match(styles, /\.comment-body \.issue-description-document \*\s*\{[^}]*user-select:\s*text;/s);
+});
+
 test("comment composer aligns with the full comment floor width", () => {
-  assert.match(styles, /\.comment-composer\s*\{[^}]*margin:\s*18px 8px 0;/s);
+  assert.match(styles, /\.comment-composer\s*\{[^}]*margin:\s*18px 0 0;/s);
   assert.match(
     styles,
     /\.comment-composer\s*\{[^}]*background:\s*var\(--surface\);[^}]*box-shadow:\s*var\(--card-shadow\);/s,

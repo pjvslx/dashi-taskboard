@@ -626,6 +626,65 @@ export class TaskboardDatabase {
     return row ? projectFromRow(row) : null;
   }
 
+  deleteProject(id) {
+    if (id === "local") {
+      throw new ApiError(400, "PROJECT_DELETE_FORBIDDEN", "The default local project cannot be deleted");
+    }
+    const project = this.getProject(id);
+    if (!project) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+    }
+    const attachments = this.database.prepare(`
+      SELECT attachments.*
+      FROM attachments
+      JOIN tasks ON tasks.id = attachments.task_id
+      WHERE tasks.project_id = ?
+      ORDER BY attachments.created_at, attachments.id
+    `).all(id).map(attachmentFromRow);
+
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(`
+        DELETE FROM ai_chat_threads
+        WHERE origin_project_id = ?
+      `).run(id);
+      this.database.prepare(`
+        DELETE FROM workflow_workspaces
+        WHERE project_id = ?
+      `).run(id);
+      this.database.prepare(`
+        DELETE FROM task_relations
+        WHERE source_task_id IN (SELECT tasks.id FROM tasks WHERE tasks.project_id = ?)
+           OR target_task_id IN (SELECT tasks.id FROM tasks WHERE tasks.project_id = ?)
+      `).run(id, id);
+      this.database.prepare(`
+        DELETE FROM attachments
+        WHERE task_id IN (SELECT tasks.id FROM tasks WHERE tasks.project_id = ?)
+      `).run(id);
+      this.database.prepare(`
+        DELETE FROM comments
+        WHERE task_id IN (SELECT tasks.id FROM tasks WHERE tasks.project_id = ?)
+      `).run(id);
+      this.database.prepare(`
+        DELETE FROM tasks
+        WHERE project_id = ?
+      `).run(id);
+      const removed = this.database.prepare(`
+        DELETE FROM projects
+        WHERE id = ?
+      `).run(id);
+      if (removed.changes !== 1) {
+        throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${id}' does not exist`);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+
+    return { project, attachments };
+  }
+
   getWorkflowWorkspace(projectId) {
     if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
       throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);

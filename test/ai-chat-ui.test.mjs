@@ -174,6 +174,14 @@ test("chat renders Markdown, public activity cards and never renders host-only f
   assert.doesNotMatch(chatSource, /manageTaskboardSkillPath/);
 });
 
+test("AI chat messages remain mouse-selectable despite the app-wide no-select shell", () => {
+  assert.match(styles, /body\s*\{[\s\S]*?user-select:\s*none;/);
+  assert.match(styles, /\.ai-chat-messages\s*\{[\s\S]*?user-select:\s*text;/);
+  assert.match(styles, /\.ai-chat-user-message\s*\{[\s\S]*?user-select:\s*text;/);
+  assert.match(styles, /\.ai-chat-assistant-message\s*\{[\s\S]*?user-select:\s*text;/);
+  assert.match(styles, /\.ai-chat-markdown\s*\{[\s\S]*?user-select:\s*text;/);
+});
+
 test("composer does not submit during IME composition and background runs keep launcher state fresh", () => {
   const composingGuard = chatSource.indexOf("event.nativeEvent.isComposing");
   const skillSelection = chatSource.indexOf('event.key === "Enter" && skillMention');

@@ -49,8 +49,8 @@ test("the app restores issue detail from the URL and follows browser history", (
     appSource.indexOf("function closeTaskDetail"),
   );
   assert.match(openTaskSource, /buildIssueUrl\(window\.location\.href, task\.projectId, null\)/);
-  assert.match(openTaskSource, /window\.history\.replaceState/);
-  assert.match(openTaskSource, /window\.history\.pushState/);
-  assert.match(appSource, /function closeTaskDetail\(\)[\s\S]*?window\.history\.replaceState/);
+  assert.match(openTaskSource, /safeReplaceHistoryState/);
+  assert.match(openTaskSource, /safePushHistoryState/);
+  assert.match(appSource, /function closeTaskDetail\(\)[\s\S]*?safeReplaceHistoryState/);
   assert.match(appSource, /onEdit=\{openTaskDetail\}/);
 });

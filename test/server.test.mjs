@@ -1172,6 +1172,118 @@ test("project and task CRUD flow", async () => {
   assert.equal(restoredWebsiteProject.issueCount, 1);
 });
 
+test("projects can be deleted with their local records", async () => {
+  let dataDirectory;
+  const baseUrl = await startServer((directory) => {
+    dataDirectory = directory;
+    return {};
+  });
+
+  const projectResult = await request(baseUrl, "/api/projects", {
+    method: "POST",
+    body: { id: "delete-me", name: "Delete Me", workspacePath: "/work/delete-me" },
+  });
+  assert.equal(projectResult.response.status, 201);
+
+  const taskResult = await request(baseUrl, "/api/tasks", {
+    method: "POST",
+    body: { projectId: "delete-me", title: "Remove this", status: "todo" },
+  });
+  const task = taskResult.body.task;
+  const commentResult = await request(baseUrl, `/api/tasks/${task.id}/comments`, {
+    method: "POST",
+    body: { body: "cleanup" },
+  });
+  const attachmentResult = await request(baseUrl, `/api/tasks/${task.id}/attachments`, {
+    method: "POST",
+    headers: {
+      "content-type": "text/plain",
+      "x-taskboard-filename": encodeURIComponent("note.txt"),
+    },
+    body: "hello",
+  });
+  await request(baseUrl, "/api/local/ai/threads", {
+    method: "POST",
+    body: {
+      title: "Local notes",
+      origin: {
+        projectId: "delete-me",
+        projectName: "Delete Me",
+        workspacePath: "/work/delete-me",
+      },
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+      sandbox: "workspace-write",
+    },
+  });
+  const workspaceResult = await request(baseUrl, "/api/projects/delete-me/workflow-workspace", {
+    method: "PUT",
+    body: {
+      version: 0,
+      workspace: {
+        version: 1,
+        tabs: [{ id: "cleanup", name: "Cleanup" }],
+        activeWorkflowId: "cleanup",
+        snapshots: {
+          cleanup: {
+            nodes: [{ id: "issue-trigger", position: { x: 100, y: 80 }, data: { kind: "issue-trigger" } }],
+            flow: {
+              version: 2,
+              root: { items: [{ type: "step", nodeId: "issue-trigger" }] },
+            },
+            selectedNodeId: "issue-trigger",
+          },
+        },
+      },
+    },
+  });
+  assert.equal(workspaceResult.response.status, 200);
+
+  const deleted = await request(baseUrl, "/api/projects/delete-me", { method: "DELETE" });
+  assert.equal(deleted.response.status, 204);
+  assert.equal(deleted.body, undefined);
+
+  const projects = await request(baseUrl, "/api/projects");
+  assert.equal(projects.body.projects.some((project) => project.id === "delete-me"), false);
+  const tasks = await request(baseUrl, "/api/tasks?projectId=delete-me");
+  assert.equal(tasks.response.status, 200);
+  assert.deepEqual(tasks.body.tasks, []);
+
+  const database = new DatabaseSync(path.join(dataDirectory, "taskboard.sqlite"), { readOnly: true });
+  try {
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = ?").get("delete-me").count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM tasks WHERE project_id = ?").get("delete-me").count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM comments WHERE task_id = ?").get(task.id).count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM attachments WHERE task_id = ?").get(task.id).count, 0);
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM workflow_workspaces WHERE project_id = ?").get("delete-me").count,
+      0,
+    );
+    assert.equal(
+      database.prepare("SELECT COUNT(*) AS count FROM ai_chat_threads WHERE origin_project_id = ?").get("delete-me").count,
+      0,
+    );
+  } finally {
+    database.close();
+  }
+  await assert.rejects(access(path.join(dataDirectory, "attachments", attachmentResult.body.attachment.id)));
+  assert.equal(commentResult.response.status, 201);
+});
+
+test("the default local project cannot be deleted", async () => {
+  const baseUrl = await startServer();
+  const deleted = await request(baseUrl, "/api/projects/local", { method: "DELETE" });
+  assert.equal(deleted.response.status, 400);
+  assert.equal(deleted.body.error.code, "PROJECT_DELETE_FORBIDDEN");
+});
+
+test("deleting an unknown project returns not found", async () => {
+  const baseUrl = await startServer();
+  const deleted = await request(baseUrl, "/api/projects/missing", { method: "DELETE" });
+  assert.equal(deleted.response.status, 404);
+  assert.equal(deleted.body.error.code, "PROJECT_NOT_FOUND");
+});
+
 test("moving a task updates its status and sort order", async () => {
   const baseUrl = await startServer();
   const createResult = await request(baseUrl, "/api/tasks", {

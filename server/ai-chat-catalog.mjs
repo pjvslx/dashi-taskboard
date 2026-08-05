@@ -229,6 +229,18 @@ function sanitizeSkills(entries) {
   return [...unique.values()].sort((left, right) => left.label.localeCompare(right.label));
 }
 
+function emptyCatalog() {
+  return {
+    models: [],
+    skills: [],
+    sandboxes: ["read-only", "workspace-write", "danger-full-access"],
+  };
+}
+
+function isCodexExecutableUnavailable(error) {
+  return error?.code === "ENOENT" || error?.code === "EPERM";
+}
+
 export async function discoverAiCatalog({
   codexExecutable,
   codexStatePath,
@@ -237,16 +249,24 @@ export async function discoverAiCatalog({
   processEnv,
 }) {
   const { workspacePath } = await resolveAiWorkspace(projectId, codexStatePath, database);
-  const [modelResult, skillEntries] = await Promise.all([
-    execFileAsync(codexExecutable, ["debug", "models"], {
-      cwd: workspacePath,
-      env: processEnv,
-      encoding: "utf8",
-      timeout: CATALOG_TIMEOUT_MS,
-      maxBuffer: CATALOG_MAX_BUFFER,
-    }),
-    listSkills(codexExecutable, workspacePath, processEnv),
-  ]);
+  let modelResult;
+  let skillEntries;
+  try {
+    [modelResult, skillEntries] = await Promise.all([
+      execFileAsync(codexExecutable, ["debug", "models"], {
+        cwd: workspacePath,
+        env: processEnv,
+        encoding: "utf8",
+        timeout: CATALOG_TIMEOUT_MS,
+        maxBuffer: CATALOG_MAX_BUFFER,
+      }),
+      listSkills(codexExecutable, workspacePath, processEnv),
+    ]);
+  } catch (error) {
+    if (!isCodexExecutableUnavailable(error)) throw error;
+    console.warn(`Codex CLI is not available for AI catalog discovery: ${error.message}`);
+    return emptyCatalog();
+  }
   const modelCatalog = JSON.parse(modelResult.stdout);
   return {
     models: sanitizeModels(modelCatalog?.models),

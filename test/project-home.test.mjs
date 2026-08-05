@@ -13,6 +13,9 @@ const labelsSource = await readFile(new URL("../web/src/labels.ts", import.meta.
 test("the project home merges live Codex projects with persisted Taskboard projects", () => {
   assert.match(appSource, /hostContext\?\.projects \?\? \[\]/);
   assert.match(appSource, /persistedById/);
+  assert.match(appSource, /const projectChoiceKey = \(project: Pick<ProjectChoice, "id" \| "name" \| "workspacePath"\>\) =>/);
+  assert.match(appSource, /project\.persisted \|\| existing\.persisted/);
+  assert.match(appSource, /issueCount: existing\.issueCount \+ project\.issueCount/);
   assert.match(appSource, /project\.inCodex \? "Codex 项目" : "已保存的项目"/);
   assert.match(appSource, /createProjectRequest/);
   assert.match(apiSource, /export async function createProject/);
@@ -84,6 +87,18 @@ test("the project header exposes real controls instead of decorative actions", (
   assert.match(appSource, /className=\{`favorite-button[\s\S]*?aria-pressed=/);
   assert.match(appSource, /FAVORITE_PROJECTS_KEY/);
   assert.match(styles, /\.header-project-menu \{[\s\S]*?-webkit-app-region: no-drag/);
+});
+
+test("saved projects can be deleted from the project home after confirmation", () => {
+  assert.match(apiSource, /export async function deleteProject\(projectId: string\): Promise<void>/);
+  assert.match(appSource, /deleteProject as deleteProjectRequest/);
+  assert.match(appSource, /async function deleteProject\(project: ProjectChoice\)/);
+  assert.match(appSource, /window\.confirm\(`删除项目“\$\{project\.name\}”/);
+  assert.match(appSource, /await deleteProjectRequest\(project\.id\)/);
+  assert.match(appSource, /project\.persisted && project\.id !== "local"/);
+  assert.match(appSource, /aria-label=\{`删除项目 \$\{project\.name\}`\}/);
+  assert.match(styles, /\.project-card-delete \{/);
+  assert.match(styles, /\.project-card:hover \.project-card-delete/);
 });
 
 test("the project breadcrumb stops at the project name", () => {

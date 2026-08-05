@@ -28,6 +28,12 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 
 let currentUserActor = DEFAULT_USER_ACTOR;
 
+declare global {
+  interface Window {
+    __TASKBOARD_API_BASE__?: string;
+  }
+}
+
 export function setCurrentUserActor(actor?: ActorIdentity) {
   currentUserActor = actor?.type === "user" ? actor : DEFAULT_USER_ACTOR;
 }
@@ -68,7 +74,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers });
+    response = await fetch(apiUrl(path), { ...init, headers });
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw error;
     throw new ApiError(0, {
@@ -82,6 +88,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) throw new ApiError(response.status, body);
   return body;
+}
+
+function apiUrl(path: string): string {
+  const base = typeof window.__TASKBOARD_API_BASE__ === "string"
+    ? window.__TASKBOARD_API_BASE__.trim()
+    : "";
+  if (!base || !path.startsWith("/")) return path;
+  return new URL(path, base.endsWith("/") ? base : `${base}/`).href;
 }
 
 export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
@@ -199,7 +213,7 @@ export function subscribeAiChatThread(
   onHint: (type: "ai.event" | "ai.run") => void,
   onError?: () => void,
 ): () => void {
-  const source = new EventSource(`/api/local/ai/threads/${encodeURIComponent(threadId)}/events`);
+  const source = new EventSource(apiUrl(`/api/local/ai/threads/${encodeURIComponent(threadId)}/events`));
   source.addEventListener("ai.event", () => onHint("ai.event"));
   source.addEventListener("ai.run", () => onHint("ai.run"));
   if (onError) source.addEventListener("error", onError);
@@ -262,6 +276,12 @@ export async function createProject(input: {
     body: JSON.stringify(input),
   });
   return data.project;
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await request<void>(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
 }
 
 export async function listDevelopmentContexts(
@@ -454,5 +474,5 @@ export async function deleteAttachment(attachment: Attachment): Promise<void> {
 }
 
 export function attachmentContentUrl(attachment: Attachment): string {
-  return `/api/attachments/${encodeURIComponent(attachment.id)}/content`;
+  return apiUrl(`/api/attachments/${encodeURIComponent(attachment.id)}/content`);
 }

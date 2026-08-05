@@ -59,6 +59,7 @@
   let noDragRight = null;
   let status = null;
   let frameOrigin = "";
+  let frameServiceOrigin = "";
   let frameReady = false;
   let frameReadyWaiters = new Set();
   let hostRequests = new Map();
@@ -554,6 +555,17 @@
     frame.contentWindow.postMessage(message, frameOrigin);
   }
 
+  function markFrameReady() {
+    frameReady = true;
+    frameReadyWaiters.forEach(({ resolve, timer }) => {
+      window.clearTimeout(timer);
+      resolve();
+    });
+    frameReadyWaiters.clear();
+    if (active) showFrame();
+    postHostContext();
+  }
+
   function dispatchHostMessage(message) {
     window.postMessage(message, window.location.origin);
   }
@@ -748,7 +760,7 @@
   async function handleAutomationRequest(payload) {
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : "";
     if (!requestId) return;
-    if (!isLocalTaskboardOrigin(frameOrigin)) {
+    if (!isLocalTaskboardOrigin(frameServiceOrigin || frameOrigin)) {
       postToFrame({
         type: "taskboard:automation-response",
         payload: { requestId, ok: false, error: "仅本地任务面板可用" },
@@ -790,14 +802,7 @@
     const message = event.data;
     if (!message || typeof message !== "object") return;
     if (message.type === "taskboard:ready") {
-      frameReady = true;
-      frameReadyWaiters.forEach(({ resolve, timer }) => {
-        window.clearTimeout(timer);
-        resolve();
-      });
-      frameReadyWaiters.clear();
-      if (active) showFrame();
-      postHostContext();
+      markFrameReady();
       return;
     }
     if (message.type === "taskboard:drag-region") {
@@ -937,6 +942,33 @@
     });
   }
 
+  function frameHasRenderedTaskboard(expectedFrame) {
+    if (!expectedFrame || expectedFrame !== frame) return false;
+    try {
+      const doc = expectedFrame.contentDocument;
+      const text = doc?.body?.innerText?.trim() || "";
+      return doc?.title === "Taskboard"
+        && text.length > 0
+        && !text.startsWith("Loading Taskboard")
+        && !text.startsWith("Taskboard failed to load:");
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function probeRenderedFrameReady(expectedFrame) {
+    const deadline = Date.now() + FRAME_READY_TIMEOUT_MS;
+    const probe = () => {
+      if (destroyed || frameReady || expectedFrame !== frame) return;
+      if (frameHasRenderedTaskboard(expectedFrame)) {
+        markFrameReady();
+        return;
+      }
+      if (Date.now() < deadline) window.setTimeout(probe, 120);
+    };
+    window.setTimeout(probe, 0);
+  }
+
   function loadTaskboardFrame(cacheBust = false) {
     cancelFrameReadyWaiters(new Error("任务面板正在重新加载"));
     frame?.remove();
@@ -950,17 +982,77 @@
     if (cacheBust) {
       taskboardUrl.searchParams.set(FRAME_REFRESH_PARAM, Date.now().toString(36));
     }
-    frameOrigin = taskboardUrl.origin;
+    frameServiceOrigin = taskboardUrl.origin;
     const nextFrame = document.createElement("iframe");
     nextFrame.id = FRAME_ID;
     nextFrame.hidden = true;
-    nextFrame.src = taskboardUrl.href;
+    if (window.location.protocol === "app:") {
+      frameOrigin = window.location.origin;
+      nextFrame.src = createBlobTaskboardUrl(taskboardUrl);
+    } else {
+      frameOrigin = taskboardUrl.origin;
+      nextFrame.src = taskboardUrl.href;
+    }
     nextFrame.title = "任务面板";
     nextFrame.referrerPolicy = "no-referrer";
     nextFrame.setAttribute("allow", "clipboard-read; clipboard-write");
     nextFrame.addEventListener("load", postHostContext);
     frame = nextFrame;
     page.appendChild(nextFrame);
+    probeRenderedFrameReady(nextFrame);
+  }
+
+  function createBlobTaskboardUrl(taskboardUrl) {
+    const serviceOrigin = taskboardUrl.origin;
+    const bootstrap = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (async () => {
+        const taskboardUrl = ${JSON.stringify(taskboardUrl.href)};
+        const serviceOrigin = ${JSON.stringify(serviceOrigin)};
+        try {
+          const response = await fetch(taskboardUrl, { credentials: 'omit' });
+          if (!response.ok) throw new Error(response.status + ' ' + response.statusText);
+          const source = await response.text();
+          const parsed = new DOMParser().parseFromString(source, 'text/html');
+          const absolutize = (value) => {
+            if (!value || !value.startsWith('/')) return value;
+            return serviceOrigin + value;
+          };
+          window.__TASKBOARD_API_BASE__ = serviceOrigin;
+          window.__TASKBOARD_EMBEDDED_HOST__ = 'codex';
+          document.head.replaceChildren();
+          const base = document.createElement('base');
+          base.href = serviceOrigin + '/';
+          document.head.appendChild(base);
+          for (const node of [...parsed.head.childNodes]) {
+            if (node.tagName === 'SCRIPT' || node.tagName === 'BASE') continue;
+            const clone = node.cloneNode(true);
+            if (clone.href) clone.href = absolutize(clone.getAttribute('href'));
+            if (clone.src) clone.src = absolutize(clone.getAttribute('src'));
+            document.head.appendChild(clone);
+          }
+          document.body.replaceChildren(...[...parsed.body.childNodes].map((node) => node.cloneNode(true)));
+          for (const sourceScript of [...parsed.querySelectorAll('script')]) {
+            const script = document.createElement('script');
+            for (const { name, value } of [...sourceScript.attributes]) {
+              script.setAttribute(name, name === 'src' ? absolutize(value) : value);
+            }
+            script.textContent = sourceScript.textContent;
+            document.body.appendChild(script);
+          }
+        } catch (error) {
+          document.body.textContent = 'Taskboard failed to load: ' + (error && error.message ? error.message : String(error));
+        }
+      })();
+    <\/script>
+  </head>
+  <body>Loading Taskboard...</body>
+</html>`;
+    return URL.createObjectURL(new Blob([bootstrap], { type: "text/html" }));
   }
 
   function reloadFrame() {
@@ -1247,6 +1339,7 @@
     noDragRight = null;
     status = null;
     frameOrigin = "";
+    frameServiceOrigin = "";
     if (window[SENTINEL_KEY] === api) delete window[SENTINEL_KEY];
   }
 

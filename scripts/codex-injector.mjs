@@ -27,6 +27,7 @@ const automationPoliciesPath = path.join(projectRoot, ".data", "codex-automation
 const taskboardOrigin = `http://127.0.0.1:${resolvePort()}`;
 const taskboardHealthUrl = `${taskboardOrigin}/health`;
 const taskboardPageUrl = `${taskboardOrigin}/?host=codex`;
+const cdpHost = "localhost";
 const hostBindingName = "__codexTaskboardHostV1";
 const hostHeartbeatName = "__codexTaskboardHostHeartbeatV1";
 const hostStartupTokenName = "__codexTaskboardHostStartupTokenV1";
@@ -197,7 +198,7 @@ function launchCodex(appPath, port) {
       appPath,
       "--args",
       `--remote-debugging-port=${port}`,
-      `--remote-allow-origins=http://127.0.0.1:${port}`,
+      `--remote-allow-origins=http://${cdpHost}:${port}`,
     ],
     { stdio: "ignore" },
   );
@@ -300,12 +301,13 @@ class CdpConnection {
 }
 
 async function codexTargets(port) {
-  const targets = await fetchJson(`http://127.0.0.1:${port}/json/list`);
+  const targets = await fetchJson(`http://${cdpHost}:${port}/json/list`);
   return targets.filter(
     (target) =>
       target.type === "page" &&
       target.webSocketDebuggerUrl &&
       !target.url?.includes("initialRoute=%2Fglobal-dictation") &&
+      !target.url?.includes("initialRoute=%2Favatar-overlay") &&
       (target.url?.startsWith("app://") || target.title === "Codex"),
   );
 }
@@ -1073,13 +1075,20 @@ async function injectTarget(
           returnByValue: true,
         }),
       });
+      const shouldShowTaskboard = shouldOpen || reconciled.shouldRemainOpen;
+      if (shouldOpen && !reconciled.shouldRemainOpen) {
+        await cdp.send("Runtime.evaluate", {
+          expression: "window.__codexTaskboardInjection__?.open()",
+          returnByValue: true,
+        });
+      }
       cdp.on("Page.loadEventFired", () => (
         publishInjectionScriptIdentifier(cdp, reconciled.scriptIdentifier)
       ));
       await publishHostHeartbeat(cdp, startupToken);
       const status = await waitForInjectionStatus(
         cdp,
-        reconciled.shouldRemainOpen,
+        shouldShowTaskboard,
         sourceHash,
         15_000,
       );
@@ -1197,14 +1206,14 @@ ${runtimeSource}`,
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const cdpVersionUrl = `http://127.0.0.1:${options.port}/json/version`;
+  const cdpVersionUrl = `http://${cdpHost}:${options.port}/json/version`;
 
   if (options.daemon) {
     let port = options.port;
     if (!options.portExplicit) {
       const candidates = codexDebuggingPorts(options.port);
       const activePort = await Promise.any(candidates.map(async (candidate) => {
-        if (!(await isReachable(`http://127.0.0.1:${candidate}/json/version`))) {
+        if (!(await isReachable(`http://${cdpHost}:${candidate}/json/version`))) {
           throw new Error("unreachable");
         }
         if ((await codexTargets(candidate)).length === 0) throw new Error("not Codex");
@@ -1223,7 +1232,7 @@ async function main() {
       : codexDebuggingPorts(options.port);
     const refreshed = [];
     for (const port of ports) {
-      if (!(await isReachable(`http://127.0.0.1:${port}/json/version`))) continue;
+      if (!(await isReachable(`http://${cdpHost}:${port}/json/version`))) continue;
       if (options.refreshIfRunning) await restartResidentInjectorForRefresh(port);
       const results = await refreshTaskboardFrames(port);
       refreshed.push(...results.map((result) => ({ port, ...result })));
@@ -1246,7 +1255,7 @@ async function main() {
     const cdpReachable = await isReachable(cdpVersionUrl);
     if (!cdpReachable) {
       if (!options.launch) {
-        throw new Error(`Codex CDP is not listening on 127.0.0.1:${options.port}`);
+        throw new Error(`Codex CDP is not listening on ${cdpHost}:${options.port}`);
       }
       if (codexIsRunning()) {
         throw new Error(

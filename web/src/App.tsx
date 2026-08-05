@@ -24,6 +24,7 @@ import {
   archiveTask as archiveTaskRequest,
   createProject as createProjectRequest,
   createTask as createTaskRequest,
+  deleteProject as deleteProjectRequest,
   getTaskboardRevision,
   getWorkflowWorkspace,
   getTaskboardMetadata,
@@ -58,6 +59,10 @@ import { TaskEditor } from "./components/TaskEditor";
 import { TaskFilterMenu } from "./components/TaskFilterMenu";
 import { buildIssueUrl, readIssueIdentifier } from "./issueRoute";
 import { DEFAULT_LABELS } from "./labels";
+import {
+  safePushHistoryState,
+  safeReplaceHistoryState,
+} from "./safeHistory";
 import {
   EMPTY_TASK_FILTERS,
   matchesTaskFilters,
@@ -114,6 +119,7 @@ interface ProjectChoice {
   issueCount: number;
   inCodex: boolean;
   persisted: boolean;
+  workspacePath: string | null;
 }
 
 interface UndoOperation {
@@ -152,6 +158,12 @@ interface ProjectAutomationRecord {
 }
 
 type ProjectAutomations = Record<string, ProjectAutomationRecord>;
+
+declare global {
+  interface Window {
+    __TASKBOARD_EMBEDDED_HOST__?: string;
+  }
+}
 
 interface AutomationHostItem {
   id: string;
@@ -218,6 +230,7 @@ const EVENT_NAMES = [
   "attachment.created",
   "attachment.deleted",
   "project.created",
+  "project.deleted",
   "workflow.updated",
 ] as const;
 
@@ -253,6 +266,12 @@ function readDeviceWorkspacePaths(): Record<string, string> {
     return {};
   }
 }
+
+const projectChoiceKey = (project: Pick<ProjectChoice, "id" | "name" | "workspacePath">) => (
+  project.workspacePath
+    ? `path:${project.workspacePath.toLocaleLowerCase()}`
+    : `name:${project.name.trim().toLocaleLowerCase() || project.id}`
+);
 
 function readShowEmptyColumns(): boolean {
   return window.localStorage.getItem(SHOW_EMPTY_COLUMNS_KEY) === "true";
@@ -395,6 +414,18 @@ function isLocalTaskboardOrigin(origin: string): boolean {
   }
 }
 
+function taskboardServiceOrigin(): string {
+  const apiBase = typeof window.__TASKBOARD_API_BASE__ === "string"
+    ? window.__TASKBOARD_API_BASE__.trim()
+    : "";
+  if (!apiBase) return window.location.origin;
+  try {
+    return new URL(apiBase).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
 function sortTasks(tasks: Task[]): Task[] {
   return [...tasks].sort(
     (left, right) => left.sortOrder - right.sortOrder || left.createdAt.localeCompare(right.createdAt),
@@ -469,7 +500,7 @@ function LocalRealtimeSync({
       }
       const affectsSelectedProject = Boolean(selectedProjectId)
         && (!payload.projectId || payload.projectId === selectedProjectId);
-      if (event.type === "project.created") {
+      if (event.type === "project.created" || event.type === "project.deleted") {
         scheduleRefresh({ projects: true });
         return;
       }
@@ -530,7 +561,9 @@ function LocalRealtimeSync({
 
 export function App() {
   const query = useMemo(() => new URLSearchParams(window.location.search), []);
-  const embedded = query.get("host") === "codex";
+  const embedded = query.get("host") === "codex"
+    || window.__TASKBOARD_EMBEDDED_HOST__ === "codex"
+    || (window.parent !== window && typeof window.__TASKBOARD_API_BASE__ === "string");
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [hostContext, setHostContext] = useState<HostContext | null>(null);
@@ -568,6 +601,7 @@ export function App() {
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
   const [settlingTaskId, setSettlingTaskId] = useState<string | null>(null);
   const [openingProjectId, setOpeningProjectId] = useState<string | null>(null);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [openingThreadTaskId, setOpeningThreadTaskId] = useState<string | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
@@ -618,7 +652,7 @@ export function App() {
     if (!embedded || window.parent === window) {
       return { unavailableReason: "仅可在 Codex App 中使用" };
     }
-    if (!isLocalTaskboardOrigin(window.location.origin)) {
+    if (!isLocalTaskboardOrigin(taskboardServiceOrigin())) {
       return { unavailableReason: "仅本地任务面板可用" };
     }
     if (!selectedProject) return { unavailableReason: "请先选择项目" };
@@ -671,31 +705,52 @@ export function App() {
     const persistedById = new Map(projects.map((project) => [project.id, project]));
     const seen = new Set<string>();
     const choices: ProjectChoice[] = [];
+    const appendProjectChoice = (project: ProjectChoice) => {
+      const key = projectChoiceKey(project);
+      const existingIndex = choices.findIndex((choice) => projectChoiceKey(choice) === key);
+      if (existingIndex === -1) {
+        choices.push(project);
+        return;
+      }
+      const existing = choices[existingIndex];
+      choices[existingIndex] = {
+        ...existing,
+        id: existing.persisted ? existing.id : project.id,
+        name: existing.name || project.name,
+        issueCount: existing.issueCount + project.issueCount,
+        inCodex: project.inCodex || existing.inCodex,
+        persisted: project.persisted || existing.persisted,
+        workspacePath: existing.workspacePath ?? project.workspacePath,
+      };
+    };
     for (const project of hostContext?.projects ?? []) {
       if (!project.id || !project.name || seen.has(project.id)) continue;
       seen.add(project.id);
-      choices.push({
+      const persisted = persistedById.get(project.id);
+      appendProjectChoice({
         id: project.id,
-        name: persistedById.get(project.id)?.name ?? project.name,
-        issueCount: persistedById.get(project.id)?.issueCount ?? 0,
+        name: persisted?.name ?? project.name,
+        issueCount: persisted?.issueCount ?? 0,
         inCodex: true,
-        persisted: persistedById.has(project.id),
+        persisted: Boolean(persisted),
+        workspacePath: persisted?.workspacePath ?? deviceWorkspacePaths[project.id] ?? null,
       });
     }
     for (const project of projects) {
       if (seen.has(project.id)) continue;
-      choices.push({
+      appendProjectChoice({
         id: project.id,
         name: project.name,
         issueCount: project.issueCount,
         inCodex: false,
         persisted: true,
+        workspacePath: project.workspacePath ?? deviceWorkspacePaths[project.id] ?? null,
       });
     }
     return choices.sort((left, right) => (
       Number(favoriteProjectIds.has(right.id)) - Number(favoriteProjectIds.has(left.id))
     ));
-  }, [favoriteProjectIds, hostContext?.projects, projects]);
+  }, [deviceWorkspacePaths, favoriteProjectIds, hostContext?.projects, projects]);
   const projectsWithIssues = useMemo(
     () => projectChoices.filter((project) => project.issueCount > 0),
     [projectChoices],
@@ -919,20 +974,20 @@ export function App() {
     const currentIssue = readIssueIdentifier(window.location.search);
     const boardUrl = buildIssueUrl(window.location.href, task.projectId, null);
     if (!currentIssue) {
-      window.history.replaceState(window.history.state, "", boardUrl);
+      safeReplaceHistoryState(window.history.state, "", boardUrl);
     }
     const detailUrl = buildIssueUrl(
       currentIssue ? window.location.href : boardUrl.href,
       task.projectId,
       task.identifier,
     );
-    window.history.pushState(window.history.state, "", detailUrl);
+    safePushHistoryState(window.history.state, "", detailUrl);
   }
 
   function closeTaskDetail() {
     setDetailTaskIdentifier(null);
     const url = buildIssueUrl(window.location.href, selectedProjectId || null, null);
-    window.history.replaceState(window.history.state, "", url);
+    safeReplaceHistoryState(window.history.state, "", url);
   }
 
   useEffect(() => {
@@ -1688,6 +1743,10 @@ export function App() {
   }
 
   function openTaskInThread(task: Task) {
+    if (task.threadId) {
+      openThread(task.threadId);
+      return;
+    }
     if (!manageTaskboardSkillPath) {
       setActionError("任务面板还没有读取到 manage-taskboard Skill 路径，请刷新后重试。");
       return;
@@ -1697,6 +1756,7 @@ export function App() {
       : null;
     const workspacePath = worktreePath
       ?? selectedDeviceWorkspacePath
+      ?? selectedProject?.workspacePath
       ?? developmentScan.workspacePath
       ?? hostContext?.workspacePath;
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}`;
@@ -1743,7 +1803,7 @@ export function App() {
     undoStackRef.current = [];
     setUndoNotice(null);
     const url = buildIssueUrl(window.location.href, projectId, null);
-    window.history.replaceState(null, "", url);
+    safeReplaceHistoryState(null, "", url);
   }
 
   function returnToProjectHome() {
@@ -1758,7 +1818,7 @@ export function App() {
     undoStackRef.current = [];
     setUndoNotice(null);
     const url = buildIssueUrl(window.location.href, null, null);
-    window.history.replaceState(null, "", url);
+    safeReplaceHistoryState(null, "", url);
     void loadProjectList();
   }
 
@@ -1802,6 +1862,39 @@ export function App() {
       setActionError(errorMessage(error));
     } finally {
       setOpeningProjectId(null);
+    }
+  }
+
+  async function deleteProject(project: ProjectChoice) {
+    if (!project.persisted || project.id === "local" || deletingProjectId) return;
+    const confirmed = window.confirm(`删除项目“${project.name}”？\n\n这会删除该项目下的议题、评论、附件、工作流画布和本地 AI 对话记录。此操作无法撤销。`);
+    if (!confirmed) return;
+    setDeletingProjectId(project.id);
+    setActionError(null);
+    try {
+      await deleteProjectRequest(project.id);
+      setProjects((current) => current.filter((candidate) => candidate.id !== project.id));
+      setFavoriteProjectIds((current) => {
+        if (!current.has(project.id)) return current;
+        const next = new Set(current);
+        next.delete(project.id);
+        window.localStorage.setItem(FAVORITE_PROJECTS_KEY, JSON.stringify([...next]));
+        return next;
+      });
+      setDeviceWorkspacePaths((current) => {
+        if (!(project.id in current)) return current;
+        const next = { ...current };
+        delete next[project.id];
+        window.localStorage.setItem(DEVICE_WORKSPACE_PATHS_KEY, JSON.stringify(next));
+        return next;
+      });
+      if (selectedProjectId === project.id) returnToProjectHome();
+      else await loadProjectList();
+      setAnnouncement(`${project.name} 已删除。`);
+    } catch (error) {
+      setActionError(errorMessage(error));
+    } finally {
+      setDeletingProjectId(null);
     }
   }
 
@@ -2122,7 +2215,7 @@ export function App() {
                             <button
                               className="project-card-open"
                               type="button"
-                              disabled={openingProjectId !== null}
+                              disabled={openingProjectId !== null || deletingProjectId !== null}
                               onClick={() => void selectProject(project)}
                             >
                               <span className="project-card-avatar" aria-hidden="true">
@@ -2140,6 +2233,18 @@ export function App() {
                                 {openingProjectId === project.id ? "正在打开…" : <LinearIcon name="chevronRight" />}
                               </span>
                             </button>
+                            {project.persisted && project.id !== "local" && (
+                              <button
+                                className="project-card-delete"
+                                type="button"
+                                disabled={deletingProjectId !== null || openingProjectId !== null}
+                                onClick={() => void deleteProject(project)}
+                                aria-label={`删除项目 ${project.name}`}
+                                title="删除项目"
+                              >
+                                {deletingProjectId === project.id ? "…" : <LinearIcon name="trash" />}
+                              </button>
+                            )}
                             <label className="project-card-directory">
                               <LinearIcon name="folder" />
                               <input
