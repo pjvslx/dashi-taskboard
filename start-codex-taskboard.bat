@@ -166,7 +166,7 @@ timeout /T 1 /NOBREAK >nul
 echo Starting independently hosted Taskboard injector...
 set "NODE_EXE="
 for /f "delims=" %%A in ('where node') do if not defined NODE_EXE set "NODE_EXE=%%A"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\install-codex-resident-task.ps1" -Port %PORT% -NodePath "%NODE_EXE%" -ProjectRoot "%REPO_DIR%" -LogPath "%LOG_FILE%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\install-codex-resident-task.ps1" -Port %PORT% -NodePath "%NODE_EXE%" -ProjectRoot "%REPO_DIR%." -LogPath "%LOG_FILE%"
 set "INJECT_EXIT=%ERRORLEVEL%"
 
 echo.

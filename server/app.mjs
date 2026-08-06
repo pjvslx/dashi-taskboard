@@ -1061,17 +1061,26 @@ function codexProjectRoot(state, projectId) {
   return typeof root === "string" && root.trim() ? root : null;
 }
 
-async function readCodexProjectWorkspaces(codexStatePath) {
+async function readCodexProjectCatalog(codexStatePath) {
   try {
     const state = JSON.parse(await readFile(codexStatePath, "utf8"));
     const projects = state["local-projects"];
-    if (!projects || typeof projects !== "object" || Array.isArray(projects)) return {};
-    return Object.fromEntries(Object.keys(projects).flatMap((projectId) => {
+    if (!projects || typeof projects !== "object" || Array.isArray(projects)) {
+      return { workspaces: {}, projects: [] };
+    }
+    const catalog = Object.keys(projects).flatMap((projectId) => {
       const root = codexProjectRoot(state, projectId);
-      return root ? [[projectId, root]] : [];
-    }));
+      const name = projects[projectId]?.name;
+      return root && typeof name === "string" && name.trim()
+        ? [{ id: projectId, name: name.trim(), workspacePath: root }]
+        : [];
+    });
+    return {
+      workspaces: Object.fromEntries(catalog.map((project) => [project.id, project.workspacePath])),
+      projects: catalog,
+    };
   } catch {
-    return {};
+    return { workspaces: {}, projects: [] };
   }
 }
 
@@ -1587,9 +1596,7 @@ export function createTaskboardServer(options = {}) {
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/device-workspaces does not accept query parameters");
         }
-        return sendJson(response, 200, {
-          workspaces: await readCodexProjectWorkspaces(resolved.codexStatePath),
-        });
+        return sendJson(response, 200, await readCodexProjectCatalog(resolved.codexStatePath));
       }
 
       if (pathname === "/api/workflow-capabilities") {

@@ -39,6 +39,7 @@ import {
   setCurrentUserActor,
   uploadAttachment,
   updateTask as updateTaskRequest,
+  type DeviceProject,
 } from "./api";
 import {
   actorForAssigneeTarget,
@@ -636,6 +637,7 @@ export function App() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [favoriteProjectIds, setFavoriteProjectIds] = useState(readFavoriteProjectIds);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
+  const [deviceProjects, setDeviceProjects] = useState<DeviceProject[]>([]);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
   const [automationPending, setAutomationPending] = useState(false);
   const [automationError, setAutomationError] = useState<string | null>(null);
@@ -735,6 +737,7 @@ export function App() {
     const persistedById = new Map(projects.map((project) => [project.id, project]));
     const seen = new Set<string>();
     const choices: ProjectChoice[] = [];
+    const codexProjects = [...deviceProjects, ...(hostContext?.projects ?? [])];
     const appendProjectChoice = (project: ProjectChoice) => {
       const existingIndex = choices.findIndex((choice) => projectChoicesMatch(choice, project));
       if (existingIndex === -1) {
@@ -752,7 +755,7 @@ export function App() {
         workspacePath: existing.workspacePath ?? project.workspacePath,
       };
     };
-    for (const project of hostContext?.projects ?? []) {
+    for (const project of codexProjects) {
       if (!project.id || !project.name || seen.has(project.id)) continue;
       seen.add(project.id);
       const persisted = persistedById.get(project.id);
@@ -779,7 +782,7 @@ export function App() {
     return choices.sort((left, right) => (
       Number(favoriteProjectIds.has(right.id)) - Number(favoriteProjectIds.has(left.id))
     ));
-  }, [deviceWorkspacePaths, favoriteProjectIds, hostContext?.projects, projects]);
+  }, [deviceProjects, deviceWorkspacePaths, favoriteProjectIds, hostContext?.projects, projects]);
   const projectsWithIssues = useMemo(
     () => projectChoices.filter((project) => project.issueCount > 0),
     [projectChoices],
@@ -1153,7 +1156,7 @@ export function App() {
     setProjectsLoading(true);
     setLoadError(null);
     try {
-      const [nextProjects, metadata, workspaces] = await Promise.all([
+      const [nextProjects, metadata, deviceCatalog] = await Promise.all([
         listProjects(signal),
         getTaskboardMetadata(signal),
         listDeviceWorkspaces(signal),
@@ -1170,8 +1173,9 @@ export function App() {
       ));
       setManageTaskboardSkillPath(metadata.manageTaskboardSkillPath ?? "");
       setLocalAiChatAvailable(metadata.capabilities?.localAiChat === true);
+      setDeviceProjects(deviceCatalog.projects);
       setDeviceWorkspacePaths((current) => {
-        const next = { ...current, ...workspaces };
+        const next = { ...current, ...deviceCatalog.workspaces };
         if (JSON.stringify(next) === JSON.stringify(current)) return current;
         window.localStorage.setItem(DEVICE_WORKSPACE_PATHS_KEY, JSON.stringify(next));
         return next;

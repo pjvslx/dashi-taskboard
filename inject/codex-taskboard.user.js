@@ -252,6 +252,13 @@
     `;
   }
 
+  function openTaskboardWebsite() {
+    const url = resolveTaskboardUrl();
+    url.searchParams.delete("host");
+    url.searchParams.delete(FRAME_REFRESH_PARAM);
+    window.open(url.href, "_blank", "noopener,noreferrer");
+  }
+
   function createEntry(reference) {
     const button = reference.cloneNode(true);
     button.id = ENTRY_ID;
@@ -273,7 +280,7 @@
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openTaskboard();
+      openTaskboardWebsite();
     });
     return button;
   }

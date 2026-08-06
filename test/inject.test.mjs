@@ -124,6 +124,17 @@ test("opening asks the resident launcher to ensure the service and rebuilds fail
   assert.match(source, /HOST_HEARTBEAT_MAX_AGE_MS/);
 });
 
+test("the Taskboard sidebar entry opens the standalone website without mounting the embedded page", () => {
+  const createEntrySource = source.slice(
+    source.indexOf("function createEntry"),
+    source.indexOf("function syncEntryState"),
+  );
+  assert.match(source, /function openTaskboardWebsite\(\)/);
+  assert.match(source, /window\.open\(url\.href, "_blank", "noopener,noreferrer"\)/);
+  assert.match(createEntrySource, /openTaskboardWebsite\(\)/);
+  assert.doesNotMatch(createEntrySource, /openTaskboard\(\)/);
+});
+
 test("rendered blob iframes can become ready even when the ready message is missed", () => {
   assert.match(source, /function markFrameReady\(\)/);
   assert.match(source, /message\.type === "taskboard:ready"[\s\S]*?markFrameReady\(\)/);

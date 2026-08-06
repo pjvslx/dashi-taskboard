@@ -12,6 +12,9 @@ const labelsSource = await readFile(new URL("../web/src/labels.ts", import.meta.
 
 test("the project home merges live Codex projects with persisted Taskboard projects", () => {
   assert.match(appSource, /hostContext\?\.projects \?\? \[\]/);
+  assert.match(appSource, /deviceProjects/);
+  assert.match(appSource, /for \(const project of codexProjects\)/);
+  assert.match(appSource, /const codexProjects = \[\.\.\.deviceProjects/);
   assert.match(appSource, /persistedById/);
   assert.match(appSource, /const projectChoiceKey = \(project: Pick<ProjectChoice, "id" \| "name" \| "workspacePath"\>\) =>/);
   assert.match(appSource, /function normalizedProjectName\(project: Pick<ProjectChoice, "id" \| "name">\)/);
@@ -28,8 +31,9 @@ test("each device stores an independent workspace path for every project", () =>
   assert.match(appSource, /const DEVICE_WORKSPACE_PATHS_KEY = "taskboard\.deviceWorkspacePaths\.v1"/);
   assert.match(appSource, /function readDeviceWorkspacePaths\(\)/);
   assert.match(appSource, /rememberDeviceWorkspacePath/);
-  assert.match(appSource, /const \[nextProjects, metadata, workspaces\] = await Promise\.all\(\[/);
+  assert.match(appSource, /const \[nextProjects, metadata, deviceCatalog\] = await Promise\.all\(\[/);
   assert.match(appSource, /listDeviceWorkspaces\(signal\)/);
+  assert.match(appSource, /setDeviceProjects\(deviceCatalog\.projects\)/);
   assert.match(appSource, /placeholder="设置此设备的项目目录"/);
   assert.match(appSource, /deviceWorkspacePaths\[selectedProjectId\]/);
   assert.match(apiSource, /query\.set\("workspacePath", workspacePath\)/);

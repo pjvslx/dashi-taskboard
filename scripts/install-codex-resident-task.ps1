@@ -7,6 +7,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+if (Test-Path -LiteralPath $LogPath -PathType Container) {
+  $LogPath = Join-Path $LogPath 'start-codex-taskboard.log'
+}
+
 function Write-LauncherLog {
   param([string]$Message)
   $directory = Split-Path -Parent $LogPath

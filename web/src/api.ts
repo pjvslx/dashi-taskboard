@@ -220,12 +220,24 @@ export function subscribeAiChatThread(
   return () => source.close();
 }
 
-export async function listDeviceWorkspaces(signal?: AbortSignal): Promise<Record<string, string>> {
+export interface DeviceProject {
+  id: string;
+  name: string;
+  workspacePath: string;
+}
+
+export interface DeviceProjectCatalog {
+  workspaces: Record<string, string>;
+  projects: DeviceProject[];
+}
+
+export async function listDeviceWorkspaces(signal?: AbortSignal): Promise<DeviceProjectCatalog> {
   try {
-    const data = await request<{ workspaces: Record<string, string> }>("/api/device-workspaces", { signal });
-    return data.workspaces;
+    return await request<DeviceProjectCatalog>("/api/device-workspaces", { signal });
   } catch (error) {
-    if (error instanceof ApiError && error.code === "LOCAL_COMPANION_REQUIRED") return {};
+    if (error instanceof ApiError && error.code === "LOCAL_COMPANION_REQUIRED") {
+      return { workspaces: {}, projects: [] };
+    }
     throw error;
   }
 }

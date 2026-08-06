@@ -108,9 +108,16 @@ test("the Windows launcher hosts the resident injector outside the Codex task tr
   assert.match(scheduledTaskInstallerSource, /RestartCount\s+3/);
   assert.match(scheduledTaskRunnerSource, /codex-injector\.mjs/);
   assert.match(scheduledTaskRunnerSource, /"--watch"/);
+  assert.doesNotMatch(scheduledTaskRunnerSource, /"--open"/);
   assert.match(scheduledTaskRunnerSource, /appendFileSync/);
   assert.match(scheduledTaskRunnerSource, /resident-start/);
   assert.match(scheduledTaskRunnerSource, /resident-exit/);
+  assert.match(scheduledTaskRunnerSource, /function startInjector\(\)/);
+  assert.match(scheduledTaskRunnerSource, /resident-child-restart/);
+  assert.match(scheduledTaskRunnerSource, /restartTimer = setTimeout\(startInjector, 1_000\)/);
+  assert.match(launcherSource, /-ProjectRoot "%REPO_DIR%\." -LogPath "%LOG_FILE%"/);
+  assert.match(scheduledTaskInstallerSource, /Test-Path -LiteralPath \$LogPath -PathType Container/);
+  assert.match(scheduledTaskInstallerSource, /Join-Path \$LogPath 'start-codex-taskboard\.log'/);
   assert.match(scheduledTaskInstallerSource, /wscript\.exe/i);
   assert.match(scheduledTaskInstallerSource, /codex-resident-task-launcher\.vbs/);
   assert.match(scheduledTaskLauncherSource, /WScript\.Shell/);

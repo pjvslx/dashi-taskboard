@@ -1011,8 +1011,8 @@ test("device workspaces come from this machine's Codex project roots", async () 
     const codexStatePath = path.join(directory, "codex-state.json");
     await writeFile(codexStatePath, JSON.stringify({
       "local-projects": {
-        "local-project-a": { rootPaths: ["/Users/alice/project-a"] },
-        "local-project-b": { rootPaths: ["/Users/alice/project-b"] },
+        "local-project-a": { name: "Project A", rootPaths: ["/Users/alice/project-a"] },
+        "local-project-b": { name: "Project B", rootPaths: ["/Users/alice/project-b"] },
       },
     }));
     return { codexStatePath };
@@ -1023,6 +1023,10 @@ test("device workspaces come from this machine's Codex project roots", async () 
     "local-project-a": "/Users/alice/project-a",
     "local-project-b": "/Users/alice/project-b",
   });
+  assert.deepEqual(result.body.projects, [
+    { id: "local-project-a", name: "Project A", workspacePath: "/Users/alice/project-a" },
+    { id: "local-project-b", name: "Project B", workspacePath: "/Users/alice/project-b" },
+  ]);
 });
 
 test("accepts private LAN requests and rejects public Host and Origin headers", async () => {
