@@ -7,6 +7,10 @@ import {
   reconcileInjectionRuntime,
   restartResidentInjector,
 } from "../scripts/codex-injector-runtime.mjs";
+import {
+  residentInjectorArgs,
+  residentTaskName,
+} from "../scripts/codex-resident-task.mjs";
 
 const currentAutomationRequest = {
   id: "host-request-1",
@@ -157,6 +161,34 @@ test("resident discovery accepts this repository's absolute and relative launch 
     defaultPort: 9229,
     cwdForPid: (pid) => cwdByPid.get(pid) ?? null,
   }), [102, 105]);
+});
+
+test("Windows resident tasks are stable per repository and debugging port", () => {
+  const first = residentTaskName("E:\\Work\\Github\\dashi-taskboard", 9231);
+  const same = residentTaskName("e:/work/github/dashi-taskboard/", 9231);
+  const otherPort = residentTaskName("E:\\Work\\Github\\dashi-taskboard", 9232);
+  const otherRepository = residentTaskName("E:\\Work\\Github\\another", 9231);
+
+  assert.equal(first, same);
+  assert.notEqual(first, otherPort);
+  assert.notEqual(first, otherRepository);
+  assert.match(first, /^DashiTaskboard-[a-f0-9]{12}-9231$/);
+});
+
+test("Windows resident task launches the injector in foreground watch mode", () => {
+  assert.deepEqual(residentInjectorArgs({
+    injectorPath: "E:\\Work\\Github\\dashi-taskboard\\scripts\\codex-injector.mjs",
+    port: 9231,
+    attachExisting: true,
+    open: true,
+  }), [
+    "E:\\Work\\Github\\dashi-taskboard\\scripts\\codex-injector.mjs",
+    "--watch",
+    "--port",
+    "9231",
+    "--open",
+    "--attach-existing",
+  ]);
 });
 
 test("refresh stops every stale resident before starting one token-verified replacement", async () => {

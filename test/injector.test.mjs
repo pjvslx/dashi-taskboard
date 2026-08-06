@@ -11,6 +11,18 @@ const runtimeSource = await readFile(
   new URL("../scripts/codex-injector-runtime.mjs", import.meta.url),
   "utf8",
 );
+const scheduledTaskInstallerSource = await readFile(
+  new URL("../scripts/install-codex-resident-task.ps1", import.meta.url),
+  "utf8",
+).catch(() => "");
+const scheduledTaskRunnerSource = await readFile(
+  new URL("../scripts/codex-resident-task-runner.mjs", import.meta.url),
+  "utf8",
+).catch(() => "");
+const scheduledTaskLauncherSource = await readFile(
+  new URL("../scripts/codex-resident-task-launcher.vbs", import.meta.url),
+  "utf8",
+).catch(() => "");
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
@@ -77,13 +89,32 @@ test("the package injection command remains resident for tab-triggered recovery"
   assert.match(source, /__codexTaskboardHostStartupTokenV1/);
 });
 
-test("the Windows launcher starts a detached resident injector instead of a foreground watcher", () => {
-  assert.match(launcherSource, /npm run codex:daemon -- --port %PORT% --attach-existing/);
+test("the daemon command remains available while the Windows launcher uses independent hosting", () => {
+  assert.doesNotMatch(launcherSource, /npm run codex:daemon/);
   assert.doesNotMatch(launcherSource, /npm run codex:inject -- --port %PORT% --open --attach-existing/);
+  assert.match(launcherSource, /install-codex-resident-task\.ps1/);
   assert.match(source, /async function startResidentInjectorForDaemon/);
   assert.match(source, /startResidentInjector\(port, options\.open, options\.attachExisting, startupToken\)/);
   assert.match(source, /await waitForResidentInjectorReady\(port, launcher\.pid, startupToken, sourceHash\)/);
   assert.match(source, /startResidentInjectorForDaemon\(port, options\)/);
+});
+
+test("the Windows launcher hosts the resident injector outside the Codex task tree", () => {
+  assert.match(launcherSource, /install-codex-resident-task\.ps1/);
+  assert.doesNotMatch(launcherSource, /npm run codex:daemon/);
+  assert.match(scheduledTaskInstallerSource, /Register-ScheduledTask/);
+  assert.match(scheduledTaskInstallerSource, /Start-ScheduledTask/);
+  assert.match(scheduledTaskInstallerSource, /ExecutionTimeLimit\s+\(\[TimeSpan\]::Zero\)/);
+  assert.match(scheduledTaskInstallerSource, /RestartCount\s+3/);
+  assert.match(scheduledTaskRunnerSource, /codex-injector\.mjs/);
+  assert.match(scheduledTaskRunnerSource, /"--watch"/);
+  assert.match(scheduledTaskRunnerSource, /appendFileSync/);
+  assert.match(scheduledTaskRunnerSource, /resident-start/);
+  assert.match(scheduledTaskRunnerSource, /resident-exit/);
+  assert.match(scheduledTaskInstallerSource, /wscript\.exe/i);
+  assert.match(scheduledTaskInstallerSource, /codex-resident-task-launcher\.vbs/);
+  assert.match(scheduledTaskLauncherSource, /WScript\.Shell/);
+  assert.match(scheduledTaskLauncherSource, /\.Run\(command, 0, True\)/i);
 });
 
 test("attach reconciles the renderer against a hashed current injection source", () => {
@@ -103,9 +134,9 @@ test("watch mode waits through startup renderer gaps and logs injector output", 
   assert.match(source, /Waiting for Codex renderer: \$\{error\.message\}/);
   assert.match(source, /await waitForInitialInjection\(/);
   assert.doesNotMatch(source, /const firstResults = await injectAll\(/);
-  assert.match(launcherSource, /2>\s*&1/);
-  assert.match(launcherSource, /tee/i);
-  assert.match(launcherSource, /injector output appended/i);
+  assert.match(scheduledTaskRunnerSource, /child\.stdout\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /child\.stderr\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /appendFileSync\(logPath, chunk\)/);
 });
 
 test("injector records exit diagnostics before returning code 1", () => {

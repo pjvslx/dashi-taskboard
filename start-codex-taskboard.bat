@@ -21,9 +21,9 @@ echo then inject the Taskboard panel into the Codex sidebar.
 echo.
 echo [%date% %time%] launcher started > "%LOG_FILE%"
 
-where npm >nul 2>nul
+where node >nul 2>nul
 if errorlevel 1 (
-  echo ERROR: npm was not found on PATH. Please install Node.js 22.5 or newer.
+  echo ERROR: node was not found on PATH. Please install Node.js 22.5 or newer.
   pause
   exit /b 1
 )
@@ -163,17 +163,19 @@ echo Restarting local Taskboard service if it is already running...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$pids = @(Get-NetTCPConnection -LocalPort 47823 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($processId in $pids) { if ($processId -and $processId -ne $PID) { try { Stop-Process -Id $processId -Force -ErrorAction Stop; Add-Content -Path '%LOG_FILE%' -Value ('stopped Taskboard service PID=' + $processId) } catch { Add-Content -Path '%LOG_FILE%' -Value ('failed to stop Taskboard PID=' + $processId + ': ' + $_.Exception.Message) } } }"
 timeout /T 1 /NOBREAK >nul
 
-echo Starting resident Taskboard injector...
-set "CODEX_TASKBOARD_HOST=%TASKBOARD_HOST%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Content -Path '%LOG_FILE%' -Value '--- injector output appended ---'; & cmd.exe /D /C \"npm run codex:daemon -- --port %PORT% --attach-existing\" 2>&1 | Tee-Object -FilePath '%LOG_FILE%' -Append; exit $LASTEXITCODE"
+echo Starting independently hosted Taskboard injector...
+set "NODE_EXE="
+for /f "delims=" %%A in ('where node') do if not defined NODE_EXE set "NODE_EXE=%%A"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\install-codex-resident-task.ps1" -Port %PORT% -NodePath "%NODE_EXE%" -ProjectRoot "%REPO_DIR%" -LogPath "%LOG_FILE%"
 set "INJECT_EXIT=%ERRORLEVEL%"
 
 echo.
 if not "%INJECT_EXIT%"=="0" (
-  echo Injector exited with code %INJECT_EXIT%.
-  echo Keep this window open and share the lines above if the panel did not appear.
+  echo Taskboard resident task failed with code %INJECT_EXIT%.
+  echo See "%LOG_FILE%" for the registration error.
   pause
   exit /b %INJECT_EXIT%
 )
-echo Resident injector is running in the background. You can close this window.
+echo Taskboard injector is hosted independently by Windows.
+echo It will remain running after a Codex task completes.
 pause
