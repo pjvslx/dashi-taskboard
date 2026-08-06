@@ -1172,6 +1172,61 @@ test("project and task CRUD flow", async () => {
   assert.equal(restoredWebsiteProject.issueCount, 1);
 });
 
+test("Codex thread continuation requests are broadcast to embedded clients", async () => {
+  const baseUrl = await startServer();
+  const eventResponse = await fetch(`${baseUrl}/api/events`);
+  const reader = eventResponse.body.getReader();
+  const decoder = new TextDecoder();
+  await reader.read();
+
+  const payload = {
+    taskId: "task-1",
+    threadId: "thread-1",
+    identifier: "DAS-123",
+    instruction: "Address DAS-123 in Chinese.",
+    skillName: "manage-taskboard",
+    skillDisplayName: "Manage Taskboard",
+    skillPath: "E:/Work/Github/dashi-taskboard/skills/manage-taskboard/SKILL.md",
+  };
+  const result = await request(baseUrl, "/api/local/codex/thread-continuations", {
+    method: "POST",
+    body: payload,
+  });
+  assert.equal(result.response.status, 202);
+  assert.equal(result.body.accepted, true);
+
+  const pending = await request(baseUrl, "/api/local/codex/thread-continuations/next");
+  assert.equal(pending.response.status, 200);
+  assert.equal(pending.body.continuation.threadId, payload.threadId);
+  const empty = await request(baseUrl, "/api/local/codex/thread-continuations/next");
+  assert.equal(empty.response.status, 200);
+  assert.equal(empty.body.continuation, null);
+
+  let message = "";
+  while (!message.includes("\n\n")) {
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false);
+    message += decoder.decode(chunk.value, { stream: true });
+  }
+  assert.match(message, /event: codex\.thread-continuation\.requested/);
+  const dataLine = message.split("\n").find((line) => line.startsWith("data: "));
+  const event = JSON.parse(dataLine.slice(6));
+  assert.equal(event.threadId, payload.threadId);
+  assert.equal(event.instruction, payload.instruction);
+  assert.equal(event.skillPath, payload.skillPath);
+  await reader.cancel();
+});
+
+test("Codex thread continuation requests reject incomplete payloads", async () => {
+  const baseUrl = await startServer();
+  const result = await request(baseUrl, "/api/local/codex/thread-continuations", {
+    method: "POST",
+    body: { threadId: "thread-1" },
+  });
+  assert.equal(result.response.status, 400);
+  assert.equal(result.body.error.code, "INVALID_FIELD");
+});
+
 test("projects can be deleted with their local records", async () => {
   let dataDirectory;
   const baseUrl = await startServer((directory) => {

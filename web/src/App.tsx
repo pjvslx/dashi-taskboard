@@ -34,6 +34,7 @@ import {
   listTasks,
   moveTask as moveTaskRequest,
   removeTaskRelation,
+  requestCodexThreadContinuation,
   restoreTask as restoreTaskRequest,
   setCurrentUserActor,
   uploadAttachment,
@@ -232,6 +233,7 @@ const EVENT_NAMES = [
   "project.created",
   "project.deleted",
   "workflow.updated",
+  "codex.thread-continuation.requested",
 ] as const;
 
 function isTheme(value: unknown): value is Theme {
@@ -457,6 +459,7 @@ function taskToDraft(task: Task): TaskDraft {
 }
 
 interface LocalRealtimeSyncProps {
+  embedded: boolean;
   selectedProjectId: string;
   detailTaskId: string | null;
   refreshProjectList: () => Promise<void>;
@@ -471,6 +474,7 @@ interface LocalRealtimeSyncProps {
 }
 
 function LocalRealtimeSync({
+  embedded,
   selectedProjectId,
   detailTaskId,
   refreshProjectList,
@@ -481,7 +485,7 @@ function LocalRealtimeSync({
   setAttachmentsRevision,
 }: LocalRealtimeSyncProps) {
   useEffect(() => {
-    const source = new EventSource("/api/events");
+    const source = new EventSource(new URL("/api/events", taskboardServiceOrigin()).href);
     let refreshTimer: number | undefined;
     let refreshProjectsPending = false;
     let refreshTasksPending = false;
@@ -502,11 +506,26 @@ function LocalRealtimeSync({
 
     const handleEvent = (event: Event) => {
       const message = event as MessageEvent<string>;
-      let payload: { projectId?: string; taskId?: string } = {};
+      let payload: {
+        projectId?: string;
+        taskId?: string;
+        threadId?: string;
+        identifier?: string;
+        instruction?: string;
+        skillName?: string;
+        skillDisplayName?: string;
+        skillPath?: string;
+      } = {};
       try {
         payload = JSON.parse(message.data) as { projectId?: string; taskId?: string };
       } catch {
         // A malformed event should not interrupt later updates.
+      }
+      if (event.type === "codex.thread-continuation.requested") {
+        if (embedded && window.parent !== window) {
+          window.parent.postMessage({ type: "taskboard:continue-thread", payload }, "*");
+        }
+        return;
       }
       const affectsSelectedProject = Boolean(selectedProjectId)
         && (!payload.projectId || payload.projectId === selectedProjectId);
@@ -557,6 +576,7 @@ function LocalRealtimeSync({
     };
   }, [
     detailTaskId,
+    embedded,
     refreshProjectList,
     refreshTasks,
     refreshWorkflowOptions,
@@ -1751,11 +1771,7 @@ export function App() {
     window.parent.postMessage({ type: "taskboard:expand-sidebar" }, "*");
   }
 
-  function openTaskInThread(task: Task) {
-    if (task.threadId) {
-      openThread(task.threadId);
-      return;
-    }
+  async function openTaskInThread(task: Task, requestedThreadId?: string | null) {
     if (!manageTaskboardSkillPath) {
       setActionError("任务面板还没有读取到 manage-taskboard Skill 路径，请刷新后重试。");
       return;
@@ -1770,6 +1786,25 @@ export function App() {
       ?? hostContext?.workspacePath;
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}\n\n请使用中文回复。`;
     const prompt = `[$manage-taskboard](${manageTaskboardSkillPath}) ${instruction}`;
+    const linkedThreadId = requestedThreadId ?? task.threadId;
+
+    if (linkedThreadId) {
+      try {
+        await requestCodexThreadContinuation({
+          taskId: task.id,
+          threadId: linkedThreadId,
+          identifier: task.identifier,
+          instruction,
+          skillName: "manage-taskboard",
+          skillDisplayName: "Manage Taskboard",
+          skillPath: manageTaskboardSkillPath,
+        });
+      } catch (error) {
+        setActionError(errorMessage(error));
+      }
+      openThread(linkedThreadId);
+      return;
+    }
 
     if (!embedded || window.parent === window) {
       const query = new URLSearchParams();
@@ -1917,6 +1952,7 @@ export function App() {
     <div className={`app-shell${embedded ? " embedded" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
+          embedded={embedded}
           selectedProjectId={selectedProjectId}
           detailTaskId={detailTaskId}
           refreshProjectList={refreshProjectList}

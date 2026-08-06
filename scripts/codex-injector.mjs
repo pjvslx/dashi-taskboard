@@ -886,6 +886,71 @@ async function focusComposerAfterSkillMention(cdp, executionContextId) {
   return positioned.result.value === true;
 }
 
+async function takePendingThreadContinuation() {
+  const response = await fetchJson(`${taskboardOrigin}/api/local/codex/thread-continuations/next`);
+  return response.continuation ?? null;
+}
+
+async function continueTaskThreadViaCdp(cdp, request) {
+  await cdp.send("Runtime.evaluate", {
+    expression: "window.__codexTaskboardInjection__?.close()",
+    returnByValue: true,
+  });
+  const navigationSettleDelayMs = 2500;
+  await new Promise((resolve) => setTimeout(resolve, navigationSettleDelayMs));
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const ready = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const composer = Array.from(document.querySelectorAll(
+          '[data-codex-composer="true"][contenteditable="true"]'
+        )).find((candidate) => candidate.getClientRects().length > 0);
+        return Boolean(composer);
+      })()`,
+      returnByValue: true,
+    });
+    if (ready.result.value === true) {
+      return prefillPlainInstructionViaCdp(cdp, request.instruction);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  throw new Error(`Timed out while opening Codex thread ${request.threadId}`);
+}
+
+async function prefillPlainInstructionViaCdp(cdp, instruction) {
+  const selected = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const editor = Array.from(document.querySelectorAll(
+        '[data-codex-composer="true"][contenteditable="true"]'
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      if (!editor) return false;
+      editor.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  if (selected.result.value !== true) throw new Error("Codex composer is not available");
+  await cdp.send("Input.insertText", { text: instruction });
+
+  const verified = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const instruction = ${JSON.stringify(instruction)};
+      const editor = Array.from(document.querySelectorAll(
+        '[data-codex-composer="true"][contenteditable="true"]'
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      return Boolean(editor && (editor.textContent || '').includes(instruction));
+    })()`,
+    returnByValue: true,
+  });
+  if (verified.result.value !== true) throw new Error("Unable to write the issue instruction into Codex");
+  return { prefilled: true, skillMention: false };
+}
+
 async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
   const {
     instruction,
@@ -1467,6 +1532,22 @@ async function main() {
         try {
           await publishHostHeartbeat(connection, options.startupToken);
         } catch (_) {}
+      }
+      const continuationConnection = injectedTargets.values().next().value;
+      if (continuationConnection) {
+        try {
+          const continuation = await takePendingThreadContinuation();
+          if (continuation) {
+            await continueTaskThreadViaCdp(continuationConnection, continuation);
+            writeInjectorDiagnostic(
+              "thread-continuation-prepared",
+              `threadId=${continuation.threadId} identifier=${continuation.identifier}`,
+            );
+          }
+        } catch (error) {
+          writeInjectorDiagnostic("thread-continuation-error", error);
+          console.error(`Unable to continue Codex thread: ${error.message}`);
+        }
       }
       try {
         const results = await injectAll(

@@ -278,6 +278,25 @@ export async function createProject(input: {
   return data.project;
 }
 
+export interface CodexThreadContinuationRequest {
+  taskId: string;
+  threadId: string;
+  identifier: string;
+  instruction: string;
+  skillName: string;
+  skillDisplayName: string;
+  skillPath: string;
+}
+
+export async function requestCodexThreadContinuation(
+  input: CodexThreadContinuationRequest,
+): Promise<void> {
+  await request<{ accepted: true }>("/api/local/codex/thread-continuations", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function deleteProject(projectId: string): Promise<void> {
   await request<void>(`/api/projects/${encodeURIComponent(projectId)}`, {
     method: "DELETE",

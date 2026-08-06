@@ -290,6 +290,28 @@ function pathField(value, name) {
   return normalized;
 }
 
+function parseCodexThreadContinuation(value) {
+  assertPlainObject(value);
+  assertAllowedKeys(value, new Set([
+    "taskId",
+    "threadId",
+    "identifier",
+    "instruction",
+    "skillName",
+    "skillDisplayName",
+    "skillPath",
+  ]));
+  return {
+    taskId: stringField(value.taskId, "taskId", { required: true, maxLength: 128 }),
+    threadId: stringField(value.threadId, "threadId", { required: true, maxLength: 256 }),
+    identifier: stringField(value.identifier, "identifier", { required: true, maxLength: 128 }),
+    instruction: stringField(value.instruction, "instruction", { required: true, maxLength: 100_000 }),
+    skillName: stringField(value.skillName, "skillName", { required: true, maxLength: 128 }),
+    skillDisplayName: stringField(value.skillDisplayName, "skillDisplayName", { required: true, maxLength: 256 }),
+    skillPath: pathField(value.skillPath, "skillPath"),
+  };
+}
+
 function parseDueDate(value, name = "dueDate") {
   const date = stringField(value, name, { nullable: true, maxLength: 10 });
   if (date !== null && date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1328,6 +1350,7 @@ export function createTaskboardServer(options = {}) {
   const resolved = resolveServerOptions(options);
   const database = new TaskboardDatabase(resolved.databasePath);
   const events = new EventHub();
+  const pendingThreadContinuations = [];
   const cloudConfig = options.cloudConfigStore ?? createCloudConfigStore({
     configPath: resolved.cloudConfigPath,
   });
@@ -1749,6 +1772,30 @@ export function createTaskboardServer(options = {}) {
         }
         events.connect(request, response);
         return;
+      }
+
+      if (pathname === "/api/local/codex/thread-continuations") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Codex continuation requests do not accept query parameters");
+        }
+        const continuation = parseCodexThreadContinuation(await readJson(request));
+        pendingThreadContinuations.push(continuation);
+        if (pendingThreadContinuations.length > 100) pendingThreadContinuations.shift();
+        events.emit("codex.thread-continuation.requested", continuation);
+        return sendJson(response, 202, { accepted: true });
+      }
+
+      if (pathname === "/api/local/codex/thread-continuations/next") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Pending Codex continuation requests do not accept query parameters");
+        }
+        return sendJson(response, 200, {
+          continuation: pendingThreadContinuations.shift() ?? null,
+        });
       }
 
       const taskRelationRoute = pathname.match(

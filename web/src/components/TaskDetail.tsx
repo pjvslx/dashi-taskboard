@@ -91,7 +91,7 @@ interface TaskDetailProps {
     relatedTaskId: string,
   ) => Promise<RelationMutationResult>;
   onOpenThread: (threadId: string) => void;
-  onOpenInThread: (task: Task) => void;
+  onOpenInThread: (task: Task, threadId?: string | null) => void;
   openingThread: boolean;
   onError: (message: string | null) => void;
   onAnnounce: (message: string) => void;
@@ -243,11 +243,7 @@ export function TaskDetail({
   const linkedThreadId = currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
 
   function openCurrentTaskInThread() {
-    if (linkedThreadId) {
-      onOpenThread(linkedThreadId);
-      return;
-    }
-    onOpenInThread(currentTask);
+    onOpenInThread(currentTask, linkedThreadId);
   }
 
   useEffect(() => {

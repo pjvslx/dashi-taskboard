@@ -9,6 +9,7 @@ const sourceUrl = new URL("../inject/codex-taskboard.user.js", import.meta.url);
 const source = await readFile(sourceUrl, "utf8");
 const webStyles = await readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
 const webApp = await readFile(new URL("../web/src/App.tsx", import.meta.url), "utf8");
+const injector = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
 
 test("injection is an idempotent IIFE guarded by its current source hash", () => {
   assert.match(source, /^\(\(\) => \{/);
@@ -263,9 +264,32 @@ test("issues open an unsent native Codex composer in the exact workspace with a 
   assert.match(webApp, /type: "taskboard:open-thread", payload: \{ threadId \}/);
 });
 
-test("opening an issue conversation reuses linked threads and persisted workspace paths", () => {
-  assert.match(webApp, /if \(task\.threadId\) \{\s*openThread\(task\.threadId\);\s*return;\s*\}/);
+test("opening an issue conversation reuses linked threads with a prepared instruction", () => {
+  assert.match(webApp, /const linkedThreadId = requestedThreadId \?\? task\.threadId/);
+  assert.match(webApp, /await requestCodexThreadContinuation\(\{/);
+  assert.match(webApp, /threadId: linkedThreadId/);
+  assert.match(webApp, /instruction,/);
+  assert.match(webApp, /openThread\(linkedThreadId\)/);
   assert.match(webApp, /\?\? selectedProject\?\.workspacePath/);
+});
+
+test("the embedded Taskboard forwards continuation requests to the Codex host", () => {
+  assert.match(webApp, /"codex\.thread-continuation\.requested"/);
+  assert.match(webApp, /type: "taskboard:continue-thread"/);
+  assert.match(source, /if \(message\.type === "taskboard:continue-thread"\)/);
+  assert.match(source, /async function continueThreadForTask\(payload\)/);
+  assert.match(source, /await openThread\(threadId\)/);
+  assert.match(source, /await requestHostTaskComposerPrefill\(\{/);
+  assert.match(source, /await waitForPreparedComposer\(identifier, skillPath\)/);
+});
+
+test("the resident injector continues existing threads without depending on the iframe", () => {
+  assert.match(injector, /async function takePendingThreadContinuation\(\)/);
+  assert.match(injector, /\/api\/local\/codex\/thread-continuations\/next/);
+  assert.match(injector, /async function continueTaskThreadViaCdp\(cdp, request\)/);
+  assert.match(injector, /const navigationSettleDelayMs = 2500/);
+  assert.match(injector, /window\.__codexTaskboardInjection__\?\.close\(\)/);
+  assert.match(injector, /prefillPlainInstructionViaCdp\(cdp, request\.instruction\)/);
 });
 
 test("the standalone web page opens linked Codex tasks through the app deep link", () => {

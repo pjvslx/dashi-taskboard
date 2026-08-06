@@ -133,8 +133,7 @@ test("issues expose processing conversations without manual binding", () => {
   assert.match(detailSource, /在对话中打开/);
   assert.match(detailSource, /const linkedThreadId = currentTask\.threadId \?\? comments\.find\(\(comment\) => comment\.threadId\)\?\.threadId \?\? null/);
   assert.match(detailSource, /function openCurrentTaskInThread\(\)/);
-  assert.match(detailSource, /if \(linkedThreadId\) \{\s*onOpenThread\(linkedThreadId\);\s*return;\s*\}/);
-  assert.match(detailSource, /onOpenInThread\(currentTask\)/);
+  assert.match(detailSource, /onOpenInThread\(currentTask, linkedThreadId\)/);
   assert.match(detailSource, /onClick=\{openCurrentTaskInThread\}/);
   assert.doesNotMatch(appSource, /detail-thread-button/);
   assert.doesNotMatch(detailSource, /输入对话 ID|解除 Codex 对话绑定|>绑定</);

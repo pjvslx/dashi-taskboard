@@ -739,6 +739,44 @@
     }
   }
 
+  async function continueThreadForTask(payload) {
+    const threadId = typeof payload?.threadId === "string" ? payload.threadId.trim() : "";
+    const identifier = typeof payload?.identifier === "string" ? payload.identifier.trim() : "";
+    const instruction = typeof payload?.instruction === "string" ? payload.instruction.trim() : "";
+    const skillName = typeof payload?.skillName === "string" ? payload.skillName.trim() : "";
+    const skillDisplayName = typeof payload?.skillDisplayName === "string"
+      ? payload.skillDisplayName.trim()
+      : "";
+    const skillPath = typeof payload?.skillPath === "string" ? payload.skillPath.trim() : "";
+    if (!threadId || !identifier || !instruction || !skillName || !skillDisplayName || !skillPath) return;
+
+    try {
+      await openThread(threadId);
+      const routeDeadline = Date.now() + 4_000;
+      while (
+        normalizeThreadId(threadIdFromLocation()) !== normalizeThreadId(threadId)
+        && Date.now() < routeDeadline
+      ) {
+        await new Promise((resolve) => window.setTimeout(resolve, 80));
+      }
+      await requestHostTaskComposerPrefill({
+        instruction,
+        skillDisplayName,
+        skillName,
+        skillPath,
+      });
+      await waitForPreparedComposer(identifier, skillPath);
+    } catch (error) {
+      postToFrame({
+        type: "taskboard:thread-create-error",
+        payload: {
+          taskId: payload?.taskId,
+          error: error instanceof Error ? error.message : "无法继续 Codex 对话",
+        },
+      });
+    }
+  }
+
   function buildAutomationHostPayload(payload) {
     return {
       requestId: payload.requestId,
@@ -811,6 +849,10 @@
     }
     if (message.type === "taskboard:open-thread") {
       void openThread(message.payload?.threadId);
+      return;
+    }
+    if (message.type === "taskboard:continue-thread") {
+      void continueThreadForTask(message.payload);
       return;
     }
     if (message.type === "taskboard:expand-sidebar") {
