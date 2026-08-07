@@ -24,15 +24,10 @@ try {
   $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path.TrimEnd('\')
   $resolvedNodePath = (Resolve-Path -LiteralPath $NodePath).Path
   $runnerPath = Join-Path $resolvedProjectRoot 'scripts\codex-resident-task-runner.mjs'
-  $launcherPath = Join-Path $resolvedProjectRoot 'scripts\codex-resident-task-launcher.vbs'
   $injectorPath = Join-Path $resolvedProjectRoot 'scripts\codex-injector.mjs'
   if (-not (Test-Path -LiteralPath $runnerPath -PathType Leaf)) {
     throw "Resident runner not found: $runnerPath"
   }
-  if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
-    throw "Resident launcher not found: $launcherPath"
-  }
-  $wscriptPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
 
   $normalizedRoot = $resolvedProjectRoot.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
   $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -67,9 +62,6 @@ try {
     }
 
   $arguments = @(
-    '//B', '//NoLogo',
-    ('"{0}"' -f $launcherPath),
-    ('"{0}"' -f $resolvedNodePath),
     ('"{0}"' -f $runnerPath),
     '--port', [string]$Port,
     '--project-root', ('"{0}"' -f $resolvedProjectRoot),
@@ -77,16 +69,20 @@ try {
     '--log-path', ('"{0}"' -f $LogPath)
   ) -join ' '
 
-  $action = New-ScheduledTaskAction -Execute $wscriptPath -Argument $arguments -WorkingDirectory $resolvedProjectRoot
+  $action = New-ScheduledTaskAction -Execute $resolvedNodePath -Argument $arguments -WorkingDirectory $resolvedProjectRoot
+  $trigger = New-ScheduledTaskTrigger -Once `
+    -At ((Get-Date).AddMinutes(1)) `
+    -RepetitionInterval (New-TimeSpan -Minutes 1) `
+    -RepetitionDuration (New-TimeSpan -Days 3650)
   $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 3 `
+    -RestartCount 999 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew `
     -StartWhenAvailable
 
-  Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
   Start-ScheduledTask -TaskName $taskName
   Write-LauncherLog "registered and started name=$taskName port=$Port"
   Write-Output $taskName

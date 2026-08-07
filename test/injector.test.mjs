@@ -19,10 +19,6 @@ const scheduledTaskRunnerSource = await readFile(
   new URL("../scripts/codex-resident-task-runner.mjs", import.meta.url),
   "utf8",
 ).catch(() => "");
-const scheduledTaskLauncherSource = await readFile(
-  new URL("../scripts/codex-resident-task-launcher.vbs", import.meta.url),
-  "utf8",
-).catch(() => "");
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
@@ -105,7 +101,10 @@ test("the Windows launcher hosts the resident injector outside the Codex task tr
   assert.match(scheduledTaskInstallerSource, /Register-ScheduledTask/);
   assert.match(scheduledTaskInstallerSource, /Start-ScheduledTask/);
   assert.match(scheduledTaskInstallerSource, /ExecutionTimeLimit\s+\(\[TimeSpan\]::Zero\)/);
-  assert.match(scheduledTaskInstallerSource, /RestartCount\s+3/);
+  assert.match(scheduledTaskInstallerSource, /RestartCount\s+999/);
+  assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskTrigger -Once/);
+  assert.match(scheduledTaskInstallerSource, /RepetitionInterval \(New-TimeSpan -Minutes 1\)/);
+  assert.match(scheduledTaskInstallerSource, /-Trigger \$trigger/);
   assert.match(scheduledTaskRunnerSource, /codex-injector\.mjs/);
   assert.match(scheduledTaskRunnerSource, /"--watch"/);
   assert.doesNotMatch(scheduledTaskRunnerSource, /"--open"/);
@@ -118,10 +117,9 @@ test("the Windows launcher hosts the resident injector outside the Codex task tr
   assert.match(launcherSource, /-ProjectRoot "%REPO_DIR%\." -LogPath "%LOG_FILE%"/);
   assert.match(scheduledTaskInstallerSource, /Test-Path -LiteralPath \$LogPath -PathType Container/);
   assert.match(scheduledTaskInstallerSource, /Join-Path \$LogPath 'start-codex-taskboard\.log'/);
-  assert.match(scheduledTaskInstallerSource, /wscript\.exe/i);
-  assert.match(scheduledTaskInstallerSource, /codex-resident-task-launcher\.vbs/);
-  assert.match(scheduledTaskLauncherSource, /WScript\.Shell/);
-  assert.match(scheduledTaskLauncherSource, /\.Run\(command, 0, True\)/i);
+  assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskAction -Execute \$resolvedNodePath/);
+  assert.doesNotMatch(scheduledTaskInstallerSource, /wscript\.exe/i);
+  assert.doesNotMatch(scheduledTaskInstallerSource, /codex-resident-task-launcher\.vbs/);
 });
 
 test("attach reconciles the renderer against a hashed current injection source", () => {
@@ -141,8 +139,8 @@ test("watch mode waits through startup renderer gaps and logs injector output", 
   assert.match(source, /Waiting for Codex renderer: \$\{error\.message\}/);
   assert.match(source, /await waitForInitialInjection\(/);
   assert.doesNotMatch(source, /const firstResults = await injectAll\(/);
-  assert.match(scheduledTaskRunnerSource, /child\.stdout\.on\("data"/);
-  assert.match(scheduledTaskRunnerSource, /child\.stderr\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /started\.stdout\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /started\.stderr\.on\("data"/);
   assert.match(scheduledTaskRunnerSource, /appendFileSync\(logPath, chunk\)/);
 });
 
