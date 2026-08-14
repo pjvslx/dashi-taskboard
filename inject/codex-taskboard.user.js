@@ -223,8 +223,9 @@
     const buttons = Array.from(scroll.querySelectorAll("button"));
     const plugin = buttons.find((button) => buttonMatches(button, PLUGIN_LABELS));
     if (plugin && plugin.parentElement) {
-      const siblings = Array.from(plugin.parentElement.children).filter((child) => child.tagName === "BUTTON");
-      if (siblings.length >= 3) return plugin;
+      const firstSection = scroll.querySelector("[data-app-action-sidebar-section]");
+      const sectionTop = firstSection?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY;
+      if (plugin.getBoundingClientRect().top < sectionTop) return plugin;
     }
 
     const firstSection = scroll.querySelector("[data-app-action-sidebar-section]");
