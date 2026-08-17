@@ -10,6 +10,7 @@ set "DATA_DIR=%REPO_DIR%.data"
 set "LOG_DIR=%DATA_DIR%\logs"
 set "LOG_FILE=%LOG_DIR%\start-codex-taskboard.log"
 set "CODEX_CLI_CONFIG=%DATA_DIR%\codex-cli-path.txt"
+set "CODEX_CLI_ROOT=C:\Users\luy\AppData\Local\OpenAI\Codex\bin"
 cd /d "%REPO_DIR%" || exit /b 1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
@@ -38,29 +39,12 @@ if "%CODEX_APP_EXE%"=="" (
   exit /b 1
 )
 
-if exist "%CODEX_CLI_CONFIG%" (
-  for /f "usebackq delims=" %%A in ("%CODEX_CLI_CONFIG%") do (
-    if "!CODEX_CLI_EXE!"=="" set "CODEX_CLI_EXE=%%A"
-  )
-  if not "!CODEX_CLI_EXE!"=="" (
-    if exist "!CODEX_CLI_EXE!\codex.exe" set "CODEX_CLI_EXE=!CODEX_CLI_EXE!\codex.exe"
-    if exist "!CODEX_CLI_EXE!" (
-      echo Using saved Codex CLI path: !CODEX_CLI_EXE!
-      echo saved codex executable=!CODEX_CLI_EXE!>> "%LOG_FILE%"
-      goto codex_cli_ready
-    )
-    echo Saved Codex CLI path is no longer valid: !CODEX_CLI_EXE!
-    echo invalid saved codex executable=!CODEX_CLI_EXE!>> "%LOG_FILE%"
-    set "CODEX_CLI_EXE="
-  )
-)
-
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cliRoot = Join-Path $env:LOCALAPPDATA 'OpenAI\Codex\bin'; Get-ChildItem -LiteralPath $cliRoot -Recurse -Filter codex.exe -ErrorAction SilentlyContinue ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1 -ExpandProperty FullName"`) do set "CODEX_CLI_EXE=%%A"
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cliRoot = '%CODEX_CLI_ROOT%'; if (Test-Path -LiteralPath $cliRoot -PathType Container) { Get-ChildItem -LiteralPath $cliRoot -Recurse -File -Filter codex.exe -ErrorAction SilentlyContinue ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1 -ExpandProperty FullName }"`) do set "CODEX_CLI_EXE=%%A"
 if not exist "%CODEX_CLI_EXE%" goto ask_codex_cli
 goto codex_cli_ready
 
 :ask_codex_cli
-echo Could not automatically find a runnable Codex CLI under "%LOCALAPPDATA%\OpenAI\Codex\bin".
+echo Could not automatically find a runnable Codex CLI under "%CODEX_CLI_ROOT%".
 echo Enter the full path to codex.exe. This launcher will remember it for next time.
 echo Press Enter to continue without local AI catalog support.
 set /P "CODEX_CLI_EXE=codex.exe path: "
