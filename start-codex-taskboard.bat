@@ -39,7 +39,7 @@ if "%CODEX_APP_EXE%"=="" (
   exit /b 1
 )
 
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cliRoot = '%CODEX_CLI_ROOT%'; if (Test-Path -LiteralPath $cliRoot -PathType Container) { Get-ChildItem -LiteralPath $cliRoot -Recurse -File -Filter codex.exe -ErrorAction SilentlyContinue ^| Sort-Object LastWriteTime -Descending ^| Select-Object -First 1 -ExpandProperty FullName }"`) do set "CODEX_CLI_EXE=%%A"
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cliRoot = '%CODEX_CLI_ROOT%'; if (Test-Path -LiteralPath $cliRoot -PathType Container) { $latest = $null; foreach ($file in Get-ChildItem -LiteralPath $cliRoot -Recurse -File -Filter codex.exe -ErrorAction SilentlyContinue) { if ($null -eq $latest -or $file.LastWriteTime -gt $latest.LastWriteTime) { $latest = $file } }; if ($null -ne $latest) { $latest.FullName } }"`) do set "CODEX_CLI_EXE=%%A"
 if not exist "%CODEX_CLI_EXE%" goto ask_codex_cli
 goto codex_cli_ready
 
