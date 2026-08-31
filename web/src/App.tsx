@@ -1988,12 +1988,16 @@ export function App() {
 
           <div className="project-nav">
             <span className="nav-label">项目</span>
-            {projects.map((project) => (
+            {projectChoices.map((project) => (
               <button
                 key={project.id}
                 type="button"
                 className={`project-nav-item${selectedProjectId === project.id ? " active" : ""}`}
-                onClick={() => changeProject(project.id)}
+                disabled={openingProjectId !== null}
+                onClick={() => {
+                  if (project.id === selectedProjectId) return;
+                  void selectProject(project);
+                }}
               >
                 <span className="project-dot" aria-hidden="true" />
                 <span>{project.name}</span>
