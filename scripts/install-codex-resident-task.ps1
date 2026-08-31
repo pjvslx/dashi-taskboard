@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory = $true)][ValidateRange(1, 65535)][int]$Port,
   [Parameter(Mandatory = $true)][string]$NodePath,
   [Parameter(Mandatory = $true)][string]$ProjectRoot,
-  [Parameter(Mandatory = $true)][string]$LogPath
+  [Parameter(Mandatory = $true)][string]$LogPath,
+  [switch]$ForceRestart
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,9 +25,13 @@ try {
   $resolvedProjectRoot = (Resolve-Path -LiteralPath $ProjectRoot).Path.TrimEnd('\')
   $resolvedNodePath = (Resolve-Path -LiteralPath $NodePath).Path
   $runnerPath = Join-Path $resolvedProjectRoot 'scripts\codex-resident-task-runner.mjs'
+  $hiddenLauncherPath = Join-Path $resolvedProjectRoot 'scripts\start-codex-resident-hidden.ps1'
   $injectorPath = Join-Path $resolvedProjectRoot 'scripts\codex-injector.mjs'
   if (-not (Test-Path -LiteralPath $runnerPath -PathType Leaf)) {
     throw "Resident runner not found: $runnerPath"
+  }
+  if (-not (Test-Path -LiteralPath $hiddenLauncherPath -PathType Leaf)) {
+    throw "Hidden resident launcher not found: $hiddenLauncherPath"
   }
 
   $normalizedRoot = $resolvedProjectRoot.Replace('\', '/').TrimEnd('/').ToLowerInvariant()
@@ -37,10 +42,24 @@ try {
     $sha.Dispose()
   }
   $hash = ([BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant().Substring(0, 12)
-  $taskName = "DashiTaskboard-$hash-$Port"
+  $taskName = "DashiTaskboard-$hash"
 
-  $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-  if ($existing) {
+  $legacyTasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+    $_.TaskName -like "$taskName-*"
+  })
+  foreach ($existing in $legacyTasks) {
+    Stop-ScheduledTask -TaskName $existing.TaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $existing.TaskName -Confirm:$false
+    Write-LauncherLog "removed legacy task name=$($existing.TaskName)"
+  }
+
+  $existingTask = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($existingTask -and $existingTask.State -eq 'Running' -and -not $ForceRestart) {
+    Write-LauncherLog "reused running task name=$taskName"
+    Write-Output $taskName
+    exit 0
+  }
+  if ($existingTask) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     Write-LauncherLog "removed previous task name=$taskName"
@@ -48,9 +67,13 @@ try {
 
   Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
-      $_.CommandLine -and
-      $_.CommandLine.IndexOf($injectorPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-      $_.CommandLine -match '(?:^|\s)--watch(?:\s|$)'
+      $commandLine = $_.CommandLine
+      $commandLine -and (
+        (
+          $commandLine.IndexOf($injectorPath, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+          $commandLine -match '(?:^|\s)--watch(?:\s|$)'
+        ) -or $commandLine.IndexOf($runnerPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+      )
     } |
     ForEach-Object {
       try {
@@ -61,28 +84,38 @@ try {
       }
     }
 
+  $powershellPath = Join-Path $PSHOME 'powershell.exe'
   $arguments = @(
-    ('"{0}"' -f $runnerPath),
-    '--port', [string]$Port,
-    '--project-root', ('"{0}"' -f $resolvedProjectRoot),
-    '--node-path', ('"{0}"' -f $resolvedNodePath),
-    '--log-path', ('"{0}"' -f $LogPath)
+    '-NoProfile',
+    '-NonInteractive',
+    '-WindowStyle', 'Hidden',
+    '-ExecutionPolicy', 'Bypass',
+    '-File', ('"{0}"' -f $hiddenLauncherPath),
+    '-NodePath', ('"{0}"' -f $resolvedNodePath),
+    '-RunnerPath', ('"{0}"' -f $runnerPath),
+    '-PreferredPort', [string]$Port,
+    '-ProjectRoot', ('"{0}"' -f $resolvedProjectRoot),
+    '-LogPath', ('"{0}"' -f $LogPath)
   ) -join ' '
 
-  $action = New-ScheduledTaskAction -Execute $resolvedNodePath -Argument $arguments -WorkingDirectory $resolvedProjectRoot
-  $trigger = New-ScheduledTaskTrigger -Once `
+  $action = New-ScheduledTaskAction -Execute $powershellPath -Argument $arguments -WorkingDirectory $resolvedProjectRoot
+  $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+  $recoveryTrigger = New-ScheduledTaskTrigger -Once `
     -At ((Get-Date).AddMinutes(1)) `
     -RepetitionInterval (New-TimeSpan -Minutes 1) `
     -RepetitionDuration (New-TimeSpan -Days 3650)
-  $principal = New-ScheduledTaskPrincipal -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited
+  $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
   $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
-    -RestartCount 999 `
+    -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1) `
     -MultipleInstances IgnoreNew `
-    -StartWhenAvailable
+    -StartWhenAvailable `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries
 
-  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
+  Register-ScheduledTask -TaskName $taskName -Action $action -Trigger @($logonTrigger, $recoveryTrigger) -Principal $principal -Settings $settings -Force | Out-Null
   Start-ScheduledTask -TaskName $taskName
   Write-LauncherLog "registered and started name=$taskName port=$Port"
   Write-Output $taskName

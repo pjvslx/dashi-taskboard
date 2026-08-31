@@ -19,6 +19,10 @@ const scheduledTaskRunnerSource = await readFile(
   new URL("../scripts/codex-resident-task-runner.mjs", import.meta.url),
   "utf8",
 ).catch(() => "");
+const hiddenLauncherSource = await readFile(
+  new URL("../scripts/start-codex-resident-hidden.ps1", import.meta.url),
+  "utf8",
+).catch(() => "");
 const packageJson = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
@@ -101,23 +105,35 @@ test("the Windows launcher hosts the resident injector outside the Codex task tr
   assert.match(scheduledTaskInstallerSource, /Register-ScheduledTask/);
   assert.match(scheduledTaskInstallerSource, /Start-ScheduledTask/);
   assert.match(scheduledTaskInstallerSource, /ExecutionTimeLimit\s+\(\[TimeSpan\]::Zero\)/);
-  assert.match(scheduledTaskInstallerSource, /RestartCount\s+999/);
+  assert.match(scheduledTaskInstallerSource, /RestartCount\s+3/);
+  assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskTrigger -AtLogOn/);
   assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskTrigger -Once/);
   assert.match(scheduledTaskInstallerSource, /RepetitionInterval \(New-TimeSpan -Minutes 1\)/);
-  assert.match(scheduledTaskInstallerSource, /-Trigger \$trigger/);
+  assert.match(scheduledTaskInstallerSource, /LogonType Interactive/);
+  assert.match(scheduledTaskInstallerSource, /'-WindowStyle', 'Hidden'/);
+  assert.match(scheduledTaskInstallerSource, /-Trigger @\(\$logonTrigger, \$recoveryTrigger\)/);
   assert.match(scheduledTaskRunnerSource, /codex-injector\.mjs/);
   assert.match(scheduledTaskRunnerSource, /"--watch"/);
   assert.doesNotMatch(scheduledTaskRunnerSource, /"--open"/);
   assert.match(scheduledTaskRunnerSource, /appendFileSync/);
   assert.match(scheduledTaskRunnerSource, /resident-start/);
-  assert.match(scheduledTaskRunnerSource, /resident-exit/);
-  assert.match(scheduledTaskRunnerSource, /function startInjector\(\)/);
-  assert.match(scheduledTaskRunnerSource, /resident-child-restart/);
-  assert.match(scheduledTaskRunnerSource, /restartTimer = setTimeout\(startInjector, 1_000\)/);
+  assert.match(scheduledTaskRunnerSource, /resident-waiting-for-codex/);
+  assert.match(scheduledTaskRunnerSource, /function startInjector\(port\)/);
+  assert.match(scheduledTaskRunnerSource, /idleDelayMs = Math\.min\(idleDelayMs \* 2, 30_000\)/);
+  assert.match(scheduledTaskRunnerSource, /resident-server-start/);
+  assert.match(scheduledTaskRunnerSource, /Taskboard service did not become healthy/);
+  assert.match(scheduledTaskRunnerSource, /missedCodexChecks < 3/);
+  assert.doesNotMatch(scheduledTaskRunnerSource, /restartTimer = setTimeout\(startInjector, 1_000\)/);
   assert.match(launcherSource, /-ProjectRoot "%REPO_DIR%\." -LogPath "%LOG_FILE%"/);
   assert.match(scheduledTaskInstallerSource, /Test-Path -LiteralPath \$LogPath -PathType Container/);
   assert.match(scheduledTaskInstallerSource, /Join-Path \$LogPath 'start-codex-taskboard\.log'/);
-  assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskAction -Execute \$resolvedNodePath/);
+  assert.match(scheduledTaskInstallerSource, /New-ScheduledTaskAction -Execute \$powershellPath/);
+  assert.match(hiddenLauncherSource, /CreateNoWindow = \$true/);
+  assert.match(hiddenLauncherSource, /ProcessWindowStyle\]::Hidden/);
+  assert.match(hiddenLauncherSource, /runner-exit pid=/);
+  assert.match(hiddenLauncherSource, /ParentProcessId -eq \$process\.Id/);
+  assert.match(scheduledTaskInstallerSource, /reused running task/);
+  assert.doesNotMatch(launcherSource, /Stop-Process -Id \$processId -Force/);
   assert.doesNotMatch(scheduledTaskInstallerSource, /wscript\.exe/i);
   assert.doesNotMatch(scheduledTaskInstallerSource, /codex-resident-task-launcher\.vbs/);
 });
@@ -139,8 +155,8 @@ test("watch mode waits through startup renderer gaps and logs injector output", 
   assert.match(source, /Waiting for Codex renderer: \$\{error\.message\}/);
   assert.match(source, /await waitForInitialInjection\(/);
   assert.doesNotMatch(source, /const firstResults = await injectAll\(/);
-  assert.match(scheduledTaskRunnerSource, /started\.stdout\.on\("data"/);
-  assert.match(scheduledTaskRunnerSource, /started\.stderr\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /child\.stdout\?\.on\("data"/);
+  assert.match(scheduledTaskRunnerSource, /child\.stderr\?\.on\("data"/);
   assert.match(scheduledTaskRunnerSource, /appendFileSync\(logPath, chunk\)/);
 });
 

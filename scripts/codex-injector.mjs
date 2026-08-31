@@ -891,13 +891,58 @@ async function takePendingThreadContinuation() {
   return response.continuation ?? null;
 }
 
-async function continueTaskThreadViaCdp(cdp, request) {
-  await cdp.send("Runtime.evaluate", {
-    expression: "window.__codexTaskboardInjection__?.close()",
+function normalizeCodexThreadId(value) {
+  return String(value || "").trim().replace(/^(?:local|cloud):/i, "");
+}
+
+async function navigateCodexThreadViaCdp(cdp, threadId) {
+  const normalizedThreadId = normalizeCodexThreadId(threadId);
+  if (!normalizedThreadId) throw new Error("Codex thread ID is required");
+  const route = `/local/${encodeURIComponent(normalizedThreadId)}`;
+
+  await cdp.send("Page.bringToFront");
+  const navigation = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      window.__codexTaskboardInjection__?.close();
+      window.postMessage({
+        type: "navigate-to-route",
+        path: ${JSON.stringify(route)},
+      }, window.location.origin);
+      return true;
+    })()`,
     returnByValue: true,
   });
-  const navigationSettleDelayMs = 2500;
-  await new Promise((resolve) => setTimeout(resolve, navigationSettleDelayMs));
+  if (navigation.exceptionDetails || navigation.result.value !== true) {
+    throw new Error(`Unable to navigate to Codex thread ${threadId}`);
+  }
+
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
+    const location = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const activeRow = Array.from(document.querySelectorAll(
+          "[data-app-action-sidebar-thread-id]"
+        )).find((row) => row.getAttribute("data-app-action-sidebar-thread-active") === "true");
+        const activeThreadId = activeRow?.getAttribute("data-app-action-sidebar-thread-id") || "";
+        if (activeThreadId) return activeThreadId;
+        const source = (window.location.pathname || "")
+          + (window.location.search || "")
+          + (window.location.hash || "");
+        const match = source.match(/(?:session|conversation|thread)(?:\\/|=|:|-)([A-Za-z0-9_.-]+)/i)
+          || source.match(/\\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[/?#]|$)/)
+          || source.match(/\\/([A-Za-z0-9_-]{24,})(?:[/?#]|$)/);
+        return match ? decodeURIComponent(match[1]) : "";
+      })()`,
+      returnByValue: true,
+    });
+    if (normalizeCodexThreadId(location.result.value) === normalizedThreadId) return;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  throw new Error(`Timed out while navigating to Codex thread ${threadId}`);
+}
+
+async function continueTaskThreadViaCdp(cdp, request) {
+  await navigateCodexThreadViaCdp(cdp, request.threadId);
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const ready = await cdp.send("Runtime.evaluate", {

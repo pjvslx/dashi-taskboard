@@ -163,16 +163,14 @@ test("resident discovery accepts this repository's absolute and relative launch 
   }), [102, 105]);
 });
 
-test("Windows resident tasks are stable per repository and debugging port", () => {
-  const first = residentTaskName("E:\\Work\\Github\\dashi-taskboard", 9231);
-  const same = residentTaskName("e:/work/github/dashi-taskboard/", 9231);
-  const otherPort = residentTaskName("E:\\Work\\Github\\dashi-taskboard", 9232);
-  const otherRepository = residentTaskName("E:\\Work\\Github\\another", 9231);
+test("Windows resident tasks are stable per repository instead of debugging port", () => {
+  const first = residentTaskName("E:\\Work\\Github\\dashi-taskboard");
+  const same = residentTaskName("e:/work/github/dashi-taskboard/");
+  const otherRepository = residentTaskName("E:\\Work\\Github\\another");
 
   assert.equal(first, same);
-  assert.notEqual(first, otherPort);
   assert.notEqual(first, otherRepository);
-  assert.match(first, /^DashiTaskboard-[a-f0-9]{12}-9231$/);
+  assert.match(first, /^DashiTaskboard-[a-f0-9]{12}$/);
 });
 
 test("Windows resident task launches the injector in foreground watch mode", () => {

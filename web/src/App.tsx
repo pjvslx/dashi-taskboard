@@ -1805,8 +1805,9 @@ export function App() {
         });
       } catch (error) {
         setActionError(errorMessage(error));
+        return;
       }
-      openThread(linkedThreadId);
+      if (embedded && window.parent !== window) openThread(linkedThreadId);
       return;
     }
 

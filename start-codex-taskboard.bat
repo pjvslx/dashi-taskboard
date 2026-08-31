@@ -143,11 +143,7 @@ pause
 exit /b 1
 
 :runinject
-echo Restarting local Taskboard service if it is already running...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$pids = @(Get-NetTCPConnection -LocalPort 47823 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique); foreach ($processId in $pids) { if ($processId -and $processId -ne $PID) { try { Stop-Process -Id $processId -Force -ErrorAction Stop; Add-Content -Path '%LOG_FILE%' -Value ('stopped Taskboard service PID=' + $processId) } catch { Add-Content -Path '%LOG_FILE%' -Value ('failed to stop Taskboard PID=' + $processId + ': ' + $_.Exception.Message) } } }"
-timeout /T 1 /NOBREAK >nul
-
-echo Starting independently hosted Taskboard injector...
+echo Ensuring the independently hosted Taskboard injector is running...
 set "NODE_EXE="
 for /f "delims=" %%A in ('where node') do if not defined NODE_EXE set "NODE_EXE=%%A"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\install-codex-resident-task.ps1" -Port %PORT% -NodePath "%NODE_EXE%" -ProjectRoot "%REPO_DIR%." -LogPath "%LOG_FILE%"
@@ -161,5 +157,6 @@ if not "%INJECT_EXIT%"=="0" (
   exit /b %INJECT_EXIT%
 )
 echo Taskboard injector is hosted independently by Windows.
-echo It will remain running after a Codex task completes.
-pause
+echo It will remain available in the background without a console window.
+timeout /T 3 /NOBREAK >nul
+exit /b 0

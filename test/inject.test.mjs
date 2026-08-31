@@ -280,7 +280,7 @@ test("opening an issue conversation reuses linked threads with a prepared instru
   assert.match(webApp, /await requestCodexThreadContinuation\(\{/);
   assert.match(webApp, /threadId: linkedThreadId/);
   assert.match(webApp, /instruction,/);
-  assert.match(webApp, /openThread\(linkedThreadId\)/);
+  assert.match(webApp, /if \(embedded && window\.parent !== window\) openThread\(linkedThreadId\)/);
   assert.match(webApp, /\?\? selectedProject\?\.workspacePath/);
 });
 
@@ -297,14 +297,24 @@ test("the embedded Taskboard forwards continuation requests to the Codex host", 
 test("the resident injector continues existing threads without depending on the iframe", () => {
   assert.match(injector, /async function takePendingThreadContinuation\(\)/);
   assert.match(injector, /\/api\/local\/codex\/thread-continuations\/next/);
+  assert.match(injector, /async function navigateCodexThreadViaCdp\(cdp, threadId\)/);
+  assert.match(injector, /await cdp\.send\("Page\.bringToFront"\)/);
+  assert.match(injector, /type: "navigate-to-route"/);
+  assert.match(injector, /const route = `\/local\/\$\{encodeURIComponent\(normalizedThreadId\)\}`/);
+  assert.match(injector, /data-app-action-sidebar-thread-active/);
   assert.match(injector, /async function continueTaskThreadViaCdp\(cdp, request\)/);
-  assert.match(injector, /const navigationSettleDelayMs = 2500/);
+  assert.match(injector, /await navigateCodexThreadViaCdp\(cdp, request\.threadId\)/);
   assert.match(injector, /window\.__codexTaskboardInjection__\?\.close\(\)/);
   assert.match(injector, /prefillPlainInstructionViaCdp\(cdp, request\.instruction\)/);
 });
 
-test("the standalone web page opens linked Codex tasks through the app deep link", () => {
-  assert.match(webApp, /window\.location\.assign\(`codex:\/\/threads\/\$\{encodeURIComponent\(threadId\.trim\(\)\)\}`\)/);
+test("the standalone web page delegates linked tasks to the resident Codex window", () => {
+  const openTaskSource = webApp.slice(
+    webApp.indexOf("async function openTaskInThread"),
+    webApp.indexOf("function changeProject"),
+  );
+  assert.match(openTaskSource, /await requestCodexThreadContinuation\(\{/);
+  assert.doesNotMatch(openTaskSource, /codex:\/\/threads/);
 });
 
 test("the injected app opens an existing local Codex task instead of a new composer", () => {

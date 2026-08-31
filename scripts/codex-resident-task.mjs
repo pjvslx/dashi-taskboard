@@ -7,12 +7,12 @@ function normalizedRepositoryPath(projectRoot) {
     .toLowerCase();
 }
 
-export function residentTaskName(projectRoot, port) {
+export function residentTaskName(projectRoot) {
   const repositoryHash = createHash("sha256")
     .update(normalizedRepositoryPath(projectRoot))
     .digest("hex")
     .slice(0, 12);
-  return `DashiTaskboard-${repositoryHash}-${port}`;
+  return `DashiTaskboard-${repositoryHash}`;
 }
 
 export function residentInjectorArgs({
