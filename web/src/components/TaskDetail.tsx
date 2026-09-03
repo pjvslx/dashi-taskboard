@@ -240,7 +240,9 @@ export function TaskDetail({
     || workflows.some((workflow) => workflow.id === currentTask.workflowId);
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
-  const linkedThreadId = currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
+  const linkedThreadId = currentTask.status === "todo"
+    ? null
+    : currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
 
   function openCurrentTaskInThread() {
     onOpenInThread(currentTask, linkedThreadId);
@@ -656,9 +658,9 @@ export function TaskDetail({
                     {description ? <DescriptionDocument value={description} /> : "添加描述…"}
                   </div>
                 )}
-                {currentTask.threadId && (
+                {linkedThreadId && (
                   <div className="issue-conversation-list" aria-label="处理此议题的对话">
-                    <ConversationLink threadId={currentTask.threadId} onOpen={onOpenThread} />
+                    <ConversationLink threadId={linkedThreadId} onOpen={onOpenThread} />
                   </div>
                 )}
               </div>

@@ -1790,7 +1790,9 @@ export function App() {
       ?? hostContext?.workspacePath;
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}\n\n请使用中文回复。`;
     const prompt = `[$manage-taskboard](${manageTaskboardSkillPath}) ${instruction}`;
-    const linkedThreadId = requestedThreadId ?? task.threadId;
+    const linkedThreadId = task.status === "todo"
+      ? null
+      : requestedThreadId ?? task.threadId;
 
     if (linkedThreadId) {
       try {
