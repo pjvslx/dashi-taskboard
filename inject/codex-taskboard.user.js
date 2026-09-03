@@ -558,9 +558,9 @@
     return payload;
   }
 
-  function postToFrame(message) {
-    if (!frame?.contentWindow || !frameOrigin) return;
-    frame.contentWindow.postMessage(message, frameOrigin);
+  function postToFrame(message, target = frame?.contentWindow) {
+    if (!target || typeof target.postMessage !== "function" || !frameOrigin) return;
+    target.postMessage(message, frameOrigin);
   }
 
   function markFrameReady() {
@@ -671,7 +671,8 @@
     );
   }
 
-  async function createThreadForTask(payload) {
+  async function createThreadForTask(payload, replyTarget = frame?.contentWindow) {
+    const postReply = (message) => postToFrame(message, replyTarget);
     const taskId = typeof payload?.taskId === "string" ? payload.taskId.trim() : "";
     const identifier = typeof payload?.identifier === "string" ? payload.identifier.trim() : "";
     const instruction = typeof payload?.instruction === "string" ? payload.instruction.trim() : "";
@@ -692,7 +693,7 @@
       ["skillPath", skillPath],
     ].filter(([, value]) => !value).map(([name]) => name);
     if (missingFields.length > 0) {
-      postToFrame({
+      postReply({
         type: "taskboard:thread-create-error",
         payload: {
           taskId,
@@ -702,7 +703,7 @@
       return;
     }
     if (pendingThreadCreation) {
-      postToFrame({
+      postReply({
         type: "taskboard:thread-create-error",
         payload: {
           taskId,
@@ -757,9 +758,9 @@
         skillPath,
       });
       await waitForPreparedComposer(identifier, skillPath);
-      postToFrame({ type: "taskboard:thread-prepared", payload: { taskId } });
+      postReply({ type: "taskboard:thread-prepared", payload: { taskId } });
     } catch (error) {
-      postToFrame({
+      postReply({
         type: "taskboard:thread-create-error",
         payload: { taskId, error: error instanceof Error ? error.message : "无法创建 Codex 对话" },
       });
@@ -865,9 +866,14 @@
   }
 
   function onFrameMessage(event) {
-    if (!frame || event.source !== frame.contentWindow || event.origin !== frameOrigin) return;
+    if (!frame || event.origin !== frameOrigin) return;
     const message = event.data;
     if (!message || typeof message !== "object") return;
+    if (message.type === "taskboard:create-thread" && event.source) {
+      void createThreadForTask(message.payload, event.source);
+      return;
+    }
+    if (event.source !== frame.contentWindow) return;
     if (message.type === "taskboard:ready") {
       markFrameReady();
       return;
@@ -892,7 +898,6 @@
       void handleAutomationRequest(message.payload);
       return;
     }
-    if (message.type === "taskboard:create-thread") void createThreadForTask(message.payload);
   }
 
   function updateDragRegion(payload) {

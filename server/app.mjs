@@ -32,6 +32,7 @@ const ATTACHMENT_BODY_LIMIT = 25 * 1024 * 1024;
 const AI_CHAT_TURN_BODY_LIMIT = 25 * 1024 * 1024;
 const AI_CHAT_ATTACHMENT_LIMIT = 10;
 const AI_CHAT_SKILL_MARKER = "\uFFFC";
+const CODEX_THREAD_CREATION_TIMEOUT_MS = 20_000;
 const INLINE_ATTACHMENT_TYPES = new Set([
   "application/pdf",
   "image/avif",
@@ -309,6 +310,40 @@ function parseCodexThreadContinuation(value) {
     skillName: stringField(value.skillName, "skillName", { required: true, maxLength: 128 }),
     skillDisplayName: stringField(value.skillDisplayName, "skillDisplayName", { required: true, maxLength: 256 }),
     skillPath: pathField(value.skillPath, "skillPath"),
+  };
+}
+
+function parseCodexThreadCreation(value) {
+  assertPlainObject(value);
+  assertAllowedKeys(value, new Set([
+    "taskId",
+    "identifier",
+    "instruction",
+    "skillName",
+    "skillDisplayName",
+    "skillPath",
+    "workspacePath",
+  ]));
+  return {
+    taskId: stringField(value.taskId, "taskId", { required: true, maxLength: 128 }),
+    identifier: stringField(value.identifier, "identifier", { required: true, maxLength: 128 }),
+    instruction: stringField(value.instruction, "instruction", { required: true, maxLength: 100_000 }),
+    skillName: stringField(value.skillName, "skillName", { required: true, maxLength: 128 }),
+    skillDisplayName: stringField(value.skillDisplayName, "skillDisplayName", { required: true, maxLength: 256 }),
+    skillPath: pathField(value.skillPath, "skillPath"),
+    workspacePath: pathField(value.workspacePath, "workspacePath"),
+  };
+}
+
+function parseCodexThreadCreationResult(value) {
+  assertPlainObject(value);
+  assertAllowedKeys(value, new Set(["ok", "error"]));
+  if (typeof value.ok !== "boolean") {
+    throw new ApiError(400, "INVALID_FIELD", "'ok' must be a boolean");
+  }
+  return {
+    ok: value.ok,
+    error: stringField(value.error, "error", { maxLength: 2_000 }),
   };
 }
 
@@ -1360,6 +1395,8 @@ export function createTaskboardServer(options = {}) {
   const database = new TaskboardDatabase(resolved.databasePath);
   const events = new EventHub();
   const pendingThreadContinuations = [];
+  const pendingThreadCreations = [];
+  const threadCreationWaiters = new Map();
   const cloudConfig = options.cloudConfigStore ?? createCloudConfigStore({
     configPath: resolved.cloudConfigPath,
   });
@@ -1803,6 +1840,62 @@ export function createTaskboardServer(options = {}) {
         return sendJson(response, 200, {
           continuation: pendingThreadContinuations.shift() ?? null,
         });
+      }
+
+      if (pathname === "/api/local/codex/thread-creations") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        assertNoQuery(url.searchParams, "Codex thread creation requests");
+        const creation = {
+          requestId: randomUUID(),
+          ...parseCodexThreadCreation(await readJson(request)),
+        };
+        const result = await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            threadCreationWaiters.delete(creation.requestId);
+            const index = pendingThreadCreations.findIndex((item) => item.requestId === creation.requestId);
+            if (index >= 0) pendingThreadCreations.splice(index, 1);
+            resolve({
+              ok: false,
+              error: "Codex 注入器在 20 秒内没有接收创建请求。下一步：确认启动脚本仍在运行，然后重启 Codex。",
+            });
+          }, CODEX_THREAD_CREATION_TIMEOUT_MS);
+          threadCreationWaiters.set(creation.requestId, { resolve, timer });
+          pendingThreadCreations.push(creation);
+          events.emit("codex.thread-creation.requested", creation);
+        });
+        if (!result.ok) {
+          throw new ApiError(503, "CODEX_THREAD_CREATION_FAILED", result.error || "Codex 任务创建失败");
+        }
+        return sendJson(response, 200, { prepared: true });
+      }
+
+      if (pathname === "/api/local/codex/thread-creations/next") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+        assertNoQuery(url.searchParams, "Pending Codex thread creation requests");
+        return sendJson(response, 200, {
+          creation: pendingThreadCreations.shift() ?? null,
+        });
+      }
+
+      const threadCreationResultRoute = pathname.match(
+        /^\/api\/local\/codex\/thread-creations\/([^/]+)\/result$/,
+      );
+      if (threadCreationResultRoute) {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        assertNoQuery(url.searchParams, "Codex thread creation results");
+        const requestId = decodeRouteSegment(threadCreationResultRoute[1], "Thread creation request id");
+        const waiter = threadCreationWaiters.get(requestId);
+        if (!waiter) {
+          throw new ApiError(404, "THREAD_CREATION_REQUEST_NOT_FOUND", "Thread creation request is no longer pending");
+        }
+        const result = parseCodexThreadCreationResult(await readJson(request));
+        clearTimeout(waiter.timer);
+        threadCreationWaiters.delete(requestId);
+        waiter.resolve(result);
+        return sendJson(response, 200, { accepted: true });
       }
 
       const taskRelationRoute = pathname.match(

@@ -146,6 +146,16 @@ async function fetchJson(url) {
   return response.json();
 }
 
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json();
+}
+
 async function isReachable(url) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(1_500) });
@@ -891,6 +901,54 @@ async function takePendingThreadContinuation() {
   return response.continuation ?? null;
 }
 
+async function takePendingThreadCreation() {
+  const response = await fetchJson(`${taskboardOrigin}/api/local/codex/thread-creations/next`);
+  return response.creation ?? null;
+}
+
+async function reportThreadCreationResult(requestId, result) {
+  return postJson(
+    `${taskboardOrigin}/api/local/codex/thread-creations/${encodeURIComponent(requestId)}/result`,
+    result,
+  );
+}
+
+async function createTaskThreadViaCdp(cdp, request) {
+  await cdp.send("Page.bringToFront");
+  const workspace = await cdp.send("Runtime.evaluate", {
+    expression: `(async () => {
+      const bridge = window.electronBridge;
+      if (!bridge || typeof bridge.sendMessageFromView !== "function") return false;
+      await bridge.sendMessageFromView({
+        type: "electron-set-active-workspace-root",
+        root: ${JSON.stringify(request.workspacePath)},
+      });
+      return true;
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  if (workspace.exceptionDetails || workspace.result.value !== true) {
+    throw new Error("Codex 无法切换到 Issue 的项目目录。下一步：确认该目录仍存在，然后重试。");
+  }
+  const navigation = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      window.__codexTaskboardInjection__?.close();
+      window.postMessage({
+        type: "navigate-to-route",
+        path: "/",
+        state: { focusComposerNonce: Date.now() },
+      }, window.location.origin);
+      return true;
+    })()`,
+    returnByValue: true,
+  });
+  if (navigation.exceptionDetails || navigation.result.value !== true) {
+    throw new Error("Codex 无法打开新任务页面。下一步：重启 Codex 后重试。");
+  }
+  await prefillTaskComposerViaCdp(cdp, undefined, request);
+}
+
 function normalizeCodexThreadId(value) {
   return String(value || "").trim().replace(/^(?:local|cloud):/i, "");
 }
@@ -1003,11 +1061,13 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
     skillName,
     skillPath,
   } = request;
+  const instructionParts = instruction.split(/\s*\n+\s*/).filter(Boolean);
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const prepared = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
         const instruction = ${JSON.stringify(instruction)};
+        const instructionParts = ${JSON.stringify(instructionParts)};
         const skillName = ${JSON.stringify(skillName)};
         const skillPath = ${JSON.stringify(skillPath)};
         const editor = Array.from(document.querySelectorAll(
@@ -1019,7 +1079,8 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
             candidate.getAttribute("skill-mention-name") === skillName
             && candidate.getAttribute("skill-mention-path") === skillPath
           ));
-        if (mention && (editor.textContent || "").includes(instruction)) {
+        const text = editor.textContent || "";
+        if (mention && instructionParts.every((part) => text.includes(part))) {
           return { ready: true, matches: true };
         }
         editor.focus();
@@ -1114,6 +1175,7 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
     const verified = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
         const instruction = ${JSON.stringify(instruction)};
+        const instructionParts = ${JSON.stringify(instructionParts)};
         const skillName = ${JSON.stringify(skillName)};
         const skillPath = ${JSON.stringify(skillPath)};
         const editor = Array.from(document.querySelectorAll(
@@ -1124,7 +1186,8 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
             candidate.getAttribute("skill-mention-name") === skillName
             && candidate.getAttribute("skill-mention-path") === skillPath
           ));
-        return Boolean(mention && (editor.textContent || "").includes(instruction));
+        const text = editor?.textContent || "";
+        return Boolean(mention && instructionParts.every((part) => text.includes(part)));
       })()`,
       contextId: executionContextId,
       returnByValue: true,
@@ -1580,6 +1643,26 @@ async function main() {
       }
       const continuationConnection = injectedTargets.values().next().value;
       if (continuationConnection) {
+        let creation = null;
+        try {
+          creation = await takePendingThreadCreation();
+          if (creation) {
+            await createTaskThreadViaCdp(continuationConnection, creation);
+            await reportThreadCreationResult(creation.requestId, { ok: true });
+            writeInjectorDiagnostic(
+              "thread-creation-prepared",
+              `requestId=${creation.requestId} identifier=${creation.identifier}`,
+            );
+          }
+        } catch (error) {
+          if (creation?.requestId) {
+            await reportThreadCreationResult(creation.requestId, {
+              ok: false,
+              error: error instanceof Error ? error.message : "Codex 任务创建失败",
+            }).catch(() => {});
+          }
+          writeInjectorDiagnostic("thread-creation-error", error);
+        }
         try {
           const continuation = await takePendingThreadContinuation();
           if (continuation) {

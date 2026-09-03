@@ -300,6 +300,25 @@ export interface CodexThreadContinuationRequest {
   skillPath: string;
 }
 
+export interface CodexThreadCreationRequest {
+  taskId: string;
+  identifier: string;
+  instruction: string;
+  skillName: string;
+  skillDisplayName: string;
+  skillPath: string;
+  workspacePath: string;
+}
+
+export async function requestCodexThreadCreation(
+  input: CodexThreadCreationRequest,
+): Promise<void> {
+  await request<{ prepared: true }>("/api/local/codex/thread-creations", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export async function requestCodexThreadContinuation(
   input: CodexThreadContinuationRequest,
 ): Promise<void> {
@@ -327,10 +346,14 @@ export async function listDevelopmentContexts(
   if (codexThreadId) query.set("codexThreadId", codexThreadId);
   if (workspacePath) query.set("workspacePath", workspacePath);
   const suffix = query.size > 0 ? `?${query}` : "";
-  return request<DevelopmentScan>(
+  const data = await request<Partial<DevelopmentScan>>(
     `/api/projects/${encodeURIComponent(projectId)}/development-contexts${suffix}`,
     { signal },
   );
+  return {
+    workspacePath: typeof data.workspacePath === "string" ? data.workspacePath : null,
+    contexts: Array.isArray(data.contexts) ? data.contexts : [],
+  };
 }
 
 export async function listTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {

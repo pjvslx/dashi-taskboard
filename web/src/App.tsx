@@ -34,6 +34,7 @@ import {
   listTasks,
   moveTask as moveTaskRequest,
   removeTaskRelation,
+  requestCodexThreadCreation,
   requestCodexThreadContinuation,
   restoreTask as restoreTaskRequest,
   setCurrentUserActor,
@@ -1814,7 +1815,6 @@ export function App() {
       ?? developmentScan.workspacePath
       ?? hostContext?.workspacePath;
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}\n\n请使用中文回复。`;
-    const prompt = `[$manage-taskboard](${manageTaskboardSkillPath}) ${instruction}`;
     const linkedThreadId = task.status === "todo"
       ? null
       : requestedThreadId ?? task.threadId;
@@ -1839,10 +1839,34 @@ export function App() {
     }
 
     if (!embedded || window.parent === window) {
-      const query = new URLSearchParams();
-      if (workspacePath) query.set("path", workspacePath);
-      query.set("prompt", prompt);
-      window.location.assign(`codex://new?${query.toString().replace(/\+/g, "%20")}`);
+      if (!workspacePath) {
+        setActionError(
+          `${task.identifier} 没有可用的项目目录。下一步：在项目首页设置此设备的项目目录后重试。`,
+        );
+        return;
+      }
+      if (openingThreadTaskId) {
+        setActionError("另一个 Issue 正在准备 Codex 任务。下一步：等待它完成后重试。");
+        return;
+      }
+      setOpeningThreadTaskId(task.id);
+      setActionError(null);
+      try {
+        await requestCodexThreadCreation({
+          taskId: task.id,
+          identifier: task.identifier,
+          instruction,
+          skillName: "manage-taskboard",
+          skillDisplayName: "Manage Taskboard",
+          skillPath: manageTaskboardSkillPath,
+          workspacePath,
+        });
+        setAnnouncement(`${task.identifier} 已在 Codex 中准备好新任务。`);
+      } catch (error) {
+        setActionError(errorMessage(error));
+      } finally {
+        setOpeningThreadTaskId(null);
+      }
       return;
     }
     if (openingThreadTaskId) {
