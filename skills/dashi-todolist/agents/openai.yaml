@@ -1,0 +1,4 @@
+interface:
+  display_name: "Dashi TodoList"
+  short_description: "Turn rough requirements into confirmed Taskboard issues"
+  default_prompt: "Use $dashi-todolist to analyze this rough requirement into a TodoList, then write one confirmed item per Taskboard issue."

@@ -44,16 +44,35 @@ npm run taskctl -- issue create \
 
 Use `npm link` if you want `taskctl` on your shell path. Set `CODEX_TASKBOARD_URL` to point the CLI at another local or LAN service. Cloud deployments are configured through the loopback companion with `taskctl cloud login`.
 
-## Install the Codex Skill
+## Install the Codex Skills
 
-Copy or symlink `skills/manage-taskboard` into the Codex skills directory, then start a new Codex task:
+This repository keeps the canonical sources for both `$manage-taskboard` and
+`$dashi-todolist` under `skills/`. After cloning the repository on a machine,
+install both user-level skills with:
 
-```bash
-ln -s /absolute/path/to/codex-taskboard/skills/manage-taskboard \
-  ~/.codex/skills/manage-taskboard
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-codex-skills.ps1
 ```
 
-The Skill teaches Codex to inspect an issue, move it to `in_progress`, use optimistic versions, verify the work, and then move it to `in_review`; it moves the issue to `done` only after the user explicitly confirms acceptance or asks to mark it complete.
+The installer uses `$CODEX_HOME\skills` when `CODEX_HOME` is set; otherwise it
+uses the standard `$HOME\.agents\skills` directory. It also records the absolute
+path of the current clone so `$dashi-todolist` can find this repository's
+`taskctl` CLI while running from any other project. Re-run the installer after
+moving the clone or setting up another PC. You can choose a different user skill
+directory with `-DestinationRoot <path>`.
+
+Start a new Codex task if the commands are not refreshed immediately. Then use:
+
+```text
+$dashi-todolist 大致的需求描述
+$manage-taskboard BB303769B9CA-2
+```
+
+`$manage-taskboard` teaches Codex to inspect an issue, move it to `in_progress`,
+use optimistic versions, verify the work, and then move it to `in_review`; it
+moves the issue to `done` only after the user explicitly confirms acceptance or
+asks to mark it complete. `$dashi-todolist` first proposes a reviewable TodoList
+and creates or updates exactly one Taskboard issue per confirmed item.
 
 ## Embed in Codex
 
