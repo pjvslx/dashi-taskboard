@@ -666,7 +666,9 @@
       }
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
-    throw new Error("Codex 对话输入框没有生成 manage-taskboard Skill 引用");
+    throw new Error(
+      "Codex 对话输入框没有生成 manage-taskboard Skill 引用。下一步：重新运行 Skill 安装器，重启 Codex 后重试。",
+    );
   }
 
   async function createThreadForTask(payload) {
@@ -681,20 +683,39 @@
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
       : "";
-    if (
-      !taskId
-      || !identifier
-      || !instruction
-      || !skillName
-      || !skillDisplayName
-      || !skillPath
-      || pendingThreadCreation
-    ) return;
+    const missingFields = [
+      ["taskId", taskId],
+      ["identifier", identifier],
+      ["instruction", instruction],
+      ["skillName", skillName],
+      ["skillDisplayName", skillDisplayName],
+      ["skillPath", skillPath],
+    ].filter(([, value]) => !value).map(([name]) => name);
+    if (missingFields.length > 0) {
+      postToFrame({
+        type: "taskboard:thread-create-error",
+        payload: {
+          taskId,
+          error: `创建 Codex 任务缺少 ${missingFields.join("、")}。下一步：刷新 Taskboard 面板后重试。`,
+        },
+      });
+      return;
+    }
+    if (pendingThreadCreation) {
+      postToFrame({
+        type: "taskboard:thread-create-error",
+        payload: {
+          taskId,
+          error: `另一个 Issue（${pendingThreadCreation}）正在创建 Codex 任务。下一步：等待其完成后重试。`,
+        },
+      });
+      return;
+    }
     pendingThreadCreation = taskId;
     try {
       const bridge = window.electronBridge;
       if (!bridge || typeof bridge.sendMessageFromView !== "function") {
-        throw new Error("当前 Codex 版本没有提供原生对话导航能力");
+        throw new Error("当前 Codex 没有提供原生任务导航能力。下一步：更新或重启 Codex 后重试。");
       }
 
       if (workspacePath) {

@@ -10,7 +10,7 @@ set "DATA_DIR=%REPO_DIR%.data"
 set "LOG_DIR=%DATA_DIR%\logs"
 set "LOG_FILE=%LOG_DIR%\start-codex-taskboard.log"
 set "CODEX_CLI_CONFIG=%DATA_DIR%\codex-cli-path.txt"
-set "CODEX_CLI_ROOT=C:\Users\luy\AppData\Local\OpenAI\Codex\bin"
+set "DEFAULT_CODEX_CLI_EXE=C:\Users\Administrator\.codex\plugins\.plugin-appserver\codex.exe"
 cd /d "%REPO_DIR%" || exit /b 1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 
@@ -30,7 +30,7 @@ if errorlevel 1 (
 )
 
 set "CODEX_APP_EXE="
-set "CODEX_CLI_EXE="
+set "CODEX_CLI_EXE=%DEFAULT_CODEX_CLI_EXE%"
 for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage OpenAI.Codex; if (-not $pkg) { exit 1 }; Join-Path $pkg.InstallLocation 'app\ChatGPT.exe'"`) do set "CODEX_APP_EXE=%%A"
 if "%CODEX_APP_EXE%"=="" (
   echo ERROR: Could not find the installed Codex app package.
@@ -39,12 +39,13 @@ if "%CODEX_APP_EXE%"=="" (
   exit /b 1
 )
 
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$cliRoot = '%CODEX_CLI_ROOT%'; if (Test-Path -LiteralPath $cliRoot -PathType Container) { $latest = $null; foreach ($file in Get-ChildItem -LiteralPath $cliRoot -Recurse -File -Filter codex.exe -ErrorAction SilentlyContinue) { if ($null -eq $latest -or $file.LastWriteTime -gt $latest.LastWriteTime) { $latest = $file } }; if ($null -ne $latest) { $latest.FullName } }"`) do set "CODEX_CLI_EXE=%%A"
 if not exist "%CODEX_CLI_EXE%" goto ask_codex_cli
+"%CODEX_CLI_EXE%" --version >nul 2>nul
+if errorlevel 1 goto ask_codex_cli
 goto codex_cli_ready
 
 :ask_codex_cli
-echo Could not automatically find a runnable Codex CLI under "%CODEX_CLI_ROOT%".
+echo Could not run the preferred Codex CLI at "%DEFAULT_CODEX_CLI_EXE%".
 echo Enter the full path to codex.exe. This launcher will remember it for next time.
 echo Press Enter to continue without local AI catalog support.
 set /P "CODEX_CLI_EXE=codex.exe path: "
@@ -58,6 +59,11 @@ if not exist "%CODEX_CLI_EXE%" (
   goto ask_codex_cli
 )
 if exist "%CODEX_CLI_EXE%\codex.exe" set "CODEX_CLI_EXE=%CODEX_CLI_EXE%\codex.exe"
+"%CODEX_CLI_EXE%" --version >nul 2>nul
+if errorlevel 1 (
+  echo ERROR: "%CODEX_CLI_EXE%" could not be executed.
+  goto ask_codex_cli
+)
 
 :codex_cli_ready
 if exist "%CODEX_CLI_EXE%\codex.exe" set "CODEX_CLI_EXE=%CODEX_CLI_EXE%\codex.exe"

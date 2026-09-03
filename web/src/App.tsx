@@ -648,6 +648,7 @@ export function App() {
   const undoSequenceRef = useRef(0);
   const undoStackRef = useRef<UndoOperation[]>([]);
   const undoInFlightRef = useRef(false);
+  const openingThreadTimeoutRef = useRef<number | null>(null);
   const dragRegionRef = useRef<HTMLDivElement>(null);
   const selectedProjectIdRef = useRef(selectedProjectId);
   selectedProjectIdRef.current = selectedProjectId;
@@ -1102,12 +1103,20 @@ export function App() {
       }
 
       if (message.type === "taskboard:thread-prepared") {
+        if (openingThreadTimeoutRef.current !== null) {
+          window.clearTimeout(openingThreadTimeoutRef.current);
+          openingThreadTimeoutRef.current = null;
+        }
         setOpeningThreadTaskId(null);
         return;
       }
 
       if (message.type === "taskboard:thread-create-error" && message.payload) {
         const payload = message.payload as { taskId?: unknown; error?: unknown };
+        if (openingThreadTimeoutRef.current !== null) {
+          window.clearTimeout(openingThreadTimeoutRef.current);
+          openingThreadTimeoutRef.current = null;
+        }
         setOpeningThreadTaskId(null);
         setActionError(typeof payload.error === "string" ? payload.error : "无法在 Codex 中创建对话。");
         return;
@@ -1124,6 +1133,10 @@ export function App() {
     window.parent.postMessage({ type: "taskboard:ready" }, "*");
     return () => {
       window.removeEventListener("message", receiveHostMessage);
+      if (openingThreadTimeoutRef.current !== null) {
+        window.clearTimeout(openingThreadTimeoutRef.current);
+        openingThreadTimeoutRef.current = null;
+      }
       for (const pending of pendingAutomationRequestsRef.current.values()) {
         window.clearTimeout(pending.timeoutId);
       }
@@ -1776,8 +1789,20 @@ export function App() {
   }
 
   async function openTaskInThread(task: Task, requestedThreadId?: string | null) {
+    const activeBlockers = task.relations.blockedBy.filter((issue) => (
+      issue.status !== "done" && issue.status !== "canceled"
+    ));
+    if (task.status === "todo" && activeBlockers.length > 0) {
+      const blockerList = activeBlockers.map((issue) => issue.identifier).join("、");
+      setActionError(
+        `${task.identifier} 仍被 ${blockerList} 阻塞，暂不能开始。下一步：先完成这些依赖 Issue，再刷新看板重试。`,
+      );
+      return;
+    }
     if (!manageTaskboardSkillPath) {
-      setActionError("任务面板还没有读取到 manage-taskboard Skill 路径，请刷新后重试。");
+      setActionError(
+        "任务面板没有读取到 manage-taskboard Skill。下一步：重新运行 Skill 安装器，重启 Codex 后再试。",
+      );
       return;
     }
     const worktreePath = task.developmentContext?.type === "worktree"
@@ -1820,7 +1845,10 @@ export function App() {
       window.location.assign(`codex://new?${query.toString().replace(/\+/g, "%20")}`);
       return;
     }
-    if (openingThreadTaskId) return;
+    if (openingThreadTaskId) {
+      setActionError("另一个 Issue 正在准备 Codex 任务。下一步：等待它完成；若长时间无响应，请刷新面板后重试。");
+      return;
+    }
     const codexProject = hostContext?.projects?.find((project) => project.id === selectedProject?.id);
     setOpeningThreadTaskId(task.id);
     setActionError(null);
@@ -1839,6 +1867,16 @@ export function App() {
         workspaceLabel: worktreePath ? workspaceName(worktreePath) : undefined,
       },
     }, "*");
+    if (openingThreadTimeoutRef.current !== null) {
+      window.clearTimeout(openingThreadTimeoutRef.current);
+    }
+    openingThreadTimeoutRef.current = window.setTimeout(() => {
+      openingThreadTimeoutRef.current = null;
+      setOpeningThreadTaskId((current) => current === task.id ? null : current);
+      setActionError(
+        "Codex 在 12 秒内没有完成新任务准备。下一步：刷新 Taskboard 面板后重试；如果仍失败，请重启 Codex。",
+      );
+    }, 12_000);
   }
 
   function changeProject(projectId: string) {

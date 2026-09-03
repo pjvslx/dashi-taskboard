@@ -240,6 +240,7 @@ export function TaskDetail({
     || workflows.some((workflow) => workflow.id === currentTask.workflowId);
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
+  const sourcePlanningThreadId = currentTask.status === "todo" ? currentTask.threadId : null;
   const linkedThreadId = currentTask.status === "todo"
     ? null
     : currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
@@ -1012,6 +1013,23 @@ export function TaskDetail({
               <span>{openingThread ? "正在打开…" : "在对话中打开"}</span>
             </button>
             <h2>属性</h2>
+            {sourcePlanningThreadId && (
+              <div className="detail-property-row source-planning-thread-property">
+                <span className="detail-property-icon" aria-hidden="true">
+                  <LinearIcon name="conversation" />
+                </span>
+                <span className="detail-property-label">规划来源</span>
+                <button
+                  className="source-planning-thread-link"
+                  type="button"
+                  title={`打开来源规划会话 ${sourcePlanningThreadId}`}
+                  onClick={() => onOpenThread(sourcePlanningThreadId)}
+                >
+                  <span>{sourcePlanningThreadId}</span>
+                  <LinearIcon name="openExternal" />
+                </button>
+              </div>
+            )}
             <label className="detail-property-row">
               <span className={`detail-property-icon status-icon-${STATUS_DETAILS[currentTask.status].tone}`}><LinearStatusIcon status={currentTask.status} /></span>
               <span className="detail-property-label">状态</span>
