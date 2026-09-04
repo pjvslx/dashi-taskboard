@@ -97,7 +97,7 @@ if errorlevel 2 (
   pause
   exit /b 1
 )
-timeout /T 2 /NOBREAK >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 2"
 
 set "SELECTED_PORT="
 for /f %%P in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "for ($port = %BASE_PORT%; $port -le %BASE_PORT% + 20; $port++) { if (-not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)) { Write-Output $port; exit 0 } }; exit 1"') do set "SELECTED_PORT=%%P"
@@ -125,7 +125,7 @@ for /L %%I in (1,1,45) do (
   curl.exe -fsS --max-time 2 "http://%CDP_HOST%:%PORT%/json/version" >nul 2>nul
   if not errorlevel 1 goto inject
   powershell -NoProfile -ExecutionPolicy Bypass -Command "$main = Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'ChatGPT.exe' -and $_.CommandLine -notmatch '--type=' } | Select-Object -First 1; if ($main) { Add-Content -Path '%LOG_FILE%' -Value ('main process: ' + $main.CommandLine) }"
-  timeout /T 1 /NOBREAK >nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 1"
 )
 
 echo ERROR: Codex did not open debug port %PORT%.
@@ -140,7 +140,7 @@ echo Waiting for Codex main window...
 for /L %%I in (1,1,45) do (
   node -e "fetch('http://%CDP_HOST%:%PORT%/json/list',{signal:AbortSignal.timeout(2000)}).then(r=>r.json()).then(targets=>process.exit(targets.some(t=>t.type==='page'&&t.url==='app://-/index.html')?0:1)).catch(()=>process.exit(1))"
   if not errorlevel 1 goto runinject
-  timeout /T 1 /NOBREAK >nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 1"
 )
 
 echo ERROR: Codex debug port is open, but the main window target did not appear.
@@ -164,5 +164,5 @@ if not "%INJECT_EXIT%"=="0" (
 )
 echo Taskboard injector is hosted independently by Windows.
 echo It will remain available in the background without a console window.
-timeout /T 3 /NOBREAK >nul
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 3"
 exit /b 0
