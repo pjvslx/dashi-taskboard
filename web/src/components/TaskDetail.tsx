@@ -241,9 +241,13 @@ export function TaskDetail({
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
   const sourcePlanningThreadId = currentTask.status === "todo" ? currentTask.threadId : null;
+  const latestCommentThreadId = [...comments]
+    .reverse()
+    .find((comment) => comment.threadId)
+    ?.threadId ?? null;
   const linkedThreadId = currentTask.status === "todo"
-    ? null
-    : currentTask.threadId ?? comments.find((comment) => comment.threadId)?.threadId ?? null;
+    ? latestCommentThreadId
+    : currentTask.threadId ?? latestCommentThreadId;
 
   function openCurrentTaskInThread() {
     onOpenInThread(currentTask, linkedThreadId);
@@ -1006,11 +1010,17 @@ export function TaskDetail({
             <button
               className="detail-open-thread-action"
               type="button"
-              disabled={openingThread}
+              disabled={openingThread || (currentTask.status === "todo" && commentsLoading)}
               onClick={openCurrentTaskInThread}
             >
               <LinearIcon name="conversation" />
-              <span>{openingThread ? "正在打开…" : "在对话中打开"}</span>
+              <span>{
+                openingThread
+                  ? "正在打开…"
+                  : currentTask.status === "todo" && commentsLoading
+                    ? "正在加载会话…"
+                    : "在对话中打开"
+              }</span>
             </button>
             <h2>属性</h2>
             {sourcePlanningThreadId && (

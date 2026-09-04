@@ -293,6 +293,8 @@ export async function createProject(input: {
 export interface CodexThreadContinuationRequest {
   taskId: string;
   threadId: string;
+  projectId: string;
+  workspacePath: string;
   identifier: string;
   instruction: string;
   skillName: string;
@@ -300,8 +302,15 @@ export interface CodexThreadContinuationRequest {
   skillPath: string;
 }
 
+export interface CodexThreadOpenRequest {
+  threadId: string;
+  projectId: string;
+  workspacePath: string;
+}
+
 export interface CodexThreadCreationRequest {
   taskId: string;
+  projectId: string;
   identifier: string;
   instruction: string;
   skillName: string;
@@ -354,6 +363,15 @@ export async function listDevelopmentContexts(
     workspacePath: typeof data.workspacePath === "string" ? data.workspacePath : null,
     contexts: Array.isArray(data.contexts) ? data.contexts : [],
   };
+}
+
+export async function requestCodexThreadOpen(
+  input: CodexThreadOpenRequest,
+): Promise<void> {
+  await request<{ accepted: true }>("/api/local/codex/thread-opens", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export async function listTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
@@ -451,7 +469,7 @@ export async function listComments(taskId: string, signal?: AbortSignal): Promis
     `/api/tasks/${encodeURIComponent(taskId)}/comments`,
     { signal },
   );
-  return data.comments;
+  return Array.isArray(data.comments) ? data.comments : [];
 }
 
 export async function createComment(taskId: string, body: string, threadId?: string): Promise<Comment> {
@@ -488,7 +506,7 @@ export async function listAttachments(taskId: string, signal?: AbortSignal): Pro
     `/api/tasks/${encodeURIComponent(taskId)}/attachments`,
     { signal },
   );
-  return data.attachments;
+  return Array.isArray(data.attachments) ? data.attachments : [];
 }
 
 export async function uploadAttachment(taskId: string, file: File): Promise<Attachment> {

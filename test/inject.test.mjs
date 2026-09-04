@@ -9,6 +9,7 @@ const sourceUrl = new URL("../inject/codex-taskboard.user.js", import.meta.url);
 const source = await readFile(sourceUrl, "utf8");
 const webStyles = await readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
 const webApp = await readFile(new URL("../web/src/App.tsx", import.meta.url), "utf8");
+const taskDetail = await readFile(new URL("../web/src/components/TaskDetail.tsx", import.meta.url), "utf8");
 const injector = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
 
 test("injection is an idempotent IIFE guarded by its current source hash", () => {
@@ -275,10 +276,18 @@ test("issues open an unsent native Codex composer in the exact workspace with a 
   assert.match(webApp, /type: "taskboard:open-thread", payload: \{ threadId \}/);
 });
 
-test("opening an issue conversation reuses linked threads with a prepared instruction", () => {
-  assert.match(webApp, /const linkedThreadId = requestedThreadId \?\? task\.threadId/);
+test("opening an issue conversation distinguishes planning sources from execution threads", () => {
+  assert.match(webApp, /let linkedThreadId = requestedThreadId/);
+  assert.match(webApp, /if \(linkedThreadId === undefined\)/);
+  assert.match(webApp, /const taskComments = await listComments\(task\.id\)/);
+  assert.match(webApp, /\[\.\.\.taskComments\]\s*\.reverse\(\)\s*\.find\(\(comment\) => comment\.threadId\)/);
+  assert.match(taskDetail, /const latestCommentThreadId = \[\.\.\.comments\]\s*\.reverse\(\)/);
+  assert.match(taskDetail, /const linkedThreadId = currentTask\.status === "todo"\s*\? latestCommentThreadId\s*: currentTask\.threadId \?\? latestCommentThreadId/);
+  assert.match(taskDetail, /currentTask\.status === "todo" && commentsLoading/);
   assert.match(webApp, /await requestCodexThreadContinuation\(\{/);
   assert.match(webApp, /threadId: linkedThreadId/);
+  assert.match(webApp, /projectId: task\.projectId/);
+  assert.match(webApp, /workspacePath,/);
   assert.match(webApp, /instruction,/);
   assert.match(webApp, /if \(embedded && window\.parent !== window\) openThread\(linkedThreadId\)/);
   assert.match(webApp, /\?\? selectedProject\?\.workspacePath/);
@@ -295,17 +304,30 @@ test("the embedded Taskboard forwards continuation requests to the Codex host", 
 });
 
 test("the resident injector continues existing threads without depending on the iframe", () => {
+  assert.match(injector, /async function activateCodexProjectViaCdp\(cdp, projectId, workspacePath\)/);
+  assert.match(injector, /data-app-action-sidebar-select-project/);
+  assert.match(injector, /async function waitForActiveCodexProjectViaCdp\(cdp, projectId/);
+  assert.match(injector, /await waitForActiveCodexProjectViaCdp\(cdp, request\.projectId\)/);
+  assert.match(injector, /async function takePendingThreadOpen\(\)/);
+  assert.match(injector, /\/api\/local\/codex\/thread-opens\/next/);
   assert.match(injector, /async function takePendingThreadContinuation\(\)/);
   assert.match(injector, /\/api\/local\/codex\/thread-continuations\/next/);
-  assert.match(injector, /async function navigateCodexThreadViaCdp\(cdp, threadId\)/);
+  assert.match(injector, /async function navigateCodexThreadViaCdp\(cdp, threadId, projectId, workspacePath\)/);
   assert.match(injector, /await cdp\.send\("Page\.bringToFront"\)/);
+  assert.match(injector, /type: "electron-set-active-workspace-root"/);
   assert.match(injector, /type: "navigate-to-route"/);
   assert.match(injector, /const route = `\/local\/\$\{encodeURIComponent\(normalizedThreadId\)\}`/);
   assert.match(injector, /data-app-action-sidebar-thread-active/);
+  assert.match(injector, /data-app-action-sidebar-project-list-id/);
+  assert.match(injector, /location\.result\.value\?\.projectId === projectId/);
   assert.match(injector, /async function continueTaskThreadViaCdp\(cdp, request\)/);
-  assert.match(injector, /await navigateCodexThreadViaCdp\(cdp, request\.threadId\)/);
+  assert.match(injector, /request\.threadId,\s*request\.projectId,\s*request\.workspacePath/);
   assert.match(injector, /window\.__codexTaskboardInjection__\?\.close\(\)/);
   assert.match(injector, /prefillPlainInstructionViaCdp\(cdp, request\.instruction\)/);
+  assert.match(injector, /const selectAllModifier = process\.platform === "darwin" \? 4 : 2/);
+  assert.match(injector, /key: "Backspace"/);
+  assert.match(injector, /const verificationDeadline = Date\.now\(\) \+ 2_000/);
+  assert.match(injector, /replace\(\/\\\\s\+\/g, ' '\)\.trim\(\)/);
 });
 
 test("the standalone web page delegates linked tasks to the resident Codex window", () => {
@@ -335,11 +357,11 @@ test("host navigation follows Codex's renderer message bus", () => {
   assert.doesNotMatch(source, /new CustomEvent\("codex-message-from-view"/);
 });
 
-test("the standalone web page opens unlinked issues as prefilled empty Codex tasks", () => {
-  assert.match(webApp, /const query = new URLSearchParams\(\)/);
-  assert.match(webApp, /query\.set\("path", workspacePath\)/);
-  assert.match(webApp, /query\.set\("prompt", prompt\)/);
-  assert.match(webApp, /window\.location\.assign\(`codex:\/\/new\?/);
+test("the standalone web page opens todo issues in their mapped Codex project", () => {
+  assert.match(webApp, /await requestCodexThreadCreation\(\{/);
+  assert.match(webApp, /taskId: task\.id,\s*projectId: task\.projectId/);
+  assert.match(webApp, /skillPath: manageTaskboardSkillPath,\s*workspacePath,/);
+  assert.doesNotMatch(webApp, /window\.location\.assign\(`codex:\/\/new\?/);
 });
 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {

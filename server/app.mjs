@@ -291,11 +291,21 @@ function pathField(value, name) {
   return normalized;
 }
 
+function requiredPathField(value, name) {
+  const normalized = pathField(value, name);
+  if (!normalized) {
+    throw new ApiError(400, "INVALID_FIELD", `'${name}' is required`);
+  }
+  return normalized;
+}
+
 function parseCodexThreadContinuation(value) {
   assertPlainObject(value);
   assertAllowedKeys(value, new Set([
     "taskId",
     "threadId",
+    "projectId",
+    "workspacePath",
     "identifier",
     "instruction",
     "skillName",
@@ -305,6 +315,8 @@ function parseCodexThreadContinuation(value) {
   return {
     taskId: stringField(value.taskId, "taskId", { required: true, maxLength: 128 }),
     threadId: stringField(value.threadId, "threadId", { required: true, maxLength: 256 }),
+    projectId: stringField(value.projectId, "projectId", { required: true, maxLength: 128 }),
+    workspacePath: requiredPathField(value.workspacePath, "workspacePath"),
     identifier: stringField(value.identifier, "identifier", { required: true, maxLength: 128 }),
     instruction: stringField(value.instruction, "instruction", { required: true, maxLength: 100_000 }),
     skillName: stringField(value.skillName, "skillName", { required: true, maxLength: 128 }),
@@ -313,10 +325,21 @@ function parseCodexThreadContinuation(value) {
   };
 }
 
+function parseCodexThreadOpen(value) {
+  assertPlainObject(value);
+  assertAllowedKeys(value, new Set(["threadId", "projectId", "workspacePath"]));
+  return {
+    threadId: stringField(value.threadId, "threadId", { required: true, maxLength: 256 }),
+    projectId: stringField(value.projectId, "projectId", { required: true, maxLength: 128 }),
+    workspacePath: requiredPathField(value.workspacePath, "workspacePath"),
+  };
+}
+
 function parseCodexThreadCreation(value) {
   assertPlainObject(value);
   assertAllowedKeys(value, new Set([
     "taskId",
+    "projectId",
     "identifier",
     "instruction",
     "skillName",
@@ -326,6 +349,7 @@ function parseCodexThreadCreation(value) {
   ]));
   return {
     taskId: stringField(value.taskId, "taskId", { required: true, maxLength: 128 }),
+    projectId: stringField(value.projectId, "projectId", { required: true, maxLength: 128 }),
     identifier: stringField(value.identifier, "identifier", { required: true, maxLength: 128 }),
     instruction: stringField(value.instruction, "instruction", { required: true, maxLength: 100_000 }),
     skillName: stringField(value.skillName, "skillName", { required: true, maxLength: 128 }),
@@ -1394,6 +1418,7 @@ export function createTaskboardServer(options = {}) {
   const resolved = resolveServerOptions(options);
   const database = new TaskboardDatabase(resolved.databasePath);
   const events = new EventHub();
+  const pendingThreadOpens = [];
   const pendingThreadContinuations = [];
   const pendingThreadCreations = [];
   const threadCreationWaiters = new Map();
@@ -1829,6 +1854,25 @@ export function createTaskboardServer(options = {}) {
         if (pendingThreadContinuations.length > 100) pendingThreadContinuations.shift();
         events.emit("codex.thread-continuation.requested", continuation);
         return sendJson(response, 202, { accepted: true });
+      }
+
+      if (pathname === "/api/local/codex/thread-opens") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        assertNoQuery(url.searchParams, "Codex thread open requests");
+        const threadOpen = parseCodexThreadOpen(await readJson(request));
+        pendingThreadOpens.push(threadOpen);
+        if (pendingThreadOpens.length > 100) pendingThreadOpens.shift();
+        return sendJson(response, 202, { accepted: true });
+      }
+
+      if (pathname === "/api/local/codex/thread-opens/next") {
+        assertAiLoopbackRequest(request);
+        if (request.method !== "GET") return methodNotAllowed(response, ["GET"]);
+        assertNoQuery(url.searchParams, "Pending Codex thread open requests");
+        return sendJson(response, 200, {
+          threadOpen: pendingThreadOpens.shift() ?? null,
+        });
       }
 
       if (pathname === "/api/local/codex/thread-continuations/next") {

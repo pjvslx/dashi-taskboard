@@ -30,12 +30,14 @@ import {
   getTaskboardMetadata,
   listDevelopmentContexts,
   listDeviceWorkspaces,
+  listComments,
   listProjects,
   listTasks,
   moveTask as moveTaskRequest,
   removeTaskRelation,
   requestCodexThreadCreation,
   requestCodexThreadContinuation,
+  requestCodexThreadOpen,
   restoreTask as restoreTaskRequest,
   setCurrentUserActor,
   uploadAttachment,
@@ -1775,13 +1777,35 @@ export function App() {
     }
   }
 
-  function openThread(threadId: string) {
+  async function openThread(threadId: string) {
     if (embedded && window.parent !== window) {
       window.parent.postMessage({ type: "taskboard:open-thread", payload: { threadId } }, "*");
       return;
     }
 
-    window.location.assign(`codex://threads/${encodeURIComponent(threadId.trim())}`);
+    if (!selectedProject) {
+      setActionError("当前没有选中的项目。");
+      return;
+    }
+    const workspacePath = selectedDeviceWorkspacePath
+      ?? selectedProject?.workspacePath
+      ?? developmentScan.workspacePath
+      ?? hostContext?.workspacePath;
+    if (!workspacePath) {
+      setActionError("当前项目没有可用的本机目录。下一步：先在项目首页设置此设备的项目目录。");
+      return;
+    }
+    setActionError(null);
+    try {
+      await requestCodexThreadOpen({
+        threadId: threadId.trim(),
+        projectId: selectedProject.id,
+        workspacePath,
+      });
+      setAnnouncement("正在切换到 Codex 对话。");
+    } catch (error) {
+      setActionError(errorMessage(error));
+    }
   }
 
   function expandCodexSidebar() {
@@ -1815,15 +1839,37 @@ export function App() {
       ?? developmentScan.workspacePath
       ?? hostContext?.workspacePath;
     const instruction = `e-taskboard Addressing the issues mentioned in ${task.identifier}\n\n请使用中文回复。`;
-    const linkedThreadId = task.status === "todo"
-      ? null
-      : requestedThreadId ?? task.threadId;
+    let linkedThreadId = requestedThreadId;
+    if (linkedThreadId === undefined) {
+      if (task.status === "todo") {
+        try {
+          const taskComments = await listComments(task.id);
+          linkedThreadId = [...taskComments]
+            .reverse()
+            .find((comment) => comment.threadId)
+            ?.threadId ?? null;
+        } catch (error) {
+          setActionError(errorMessage(error));
+          return;
+        }
+      } else {
+        linkedThreadId = task.threadId;
+      }
+    }
 
     if (linkedThreadId) {
+      if (!workspacePath) {
+        setActionError(
+          `${task.identifier} 没有可用的项目目录。下一步：在项目首页设置此设备的项目目录后重试。`,
+        );
+        return;
+      }
       try {
         await requestCodexThreadContinuation({
           taskId: task.id,
           threadId: linkedThreadId,
+          projectId: task.projectId,
+          workspacePath,
           identifier: task.identifier,
           instruction,
           skillName: "manage-taskboard",
@@ -1854,6 +1900,7 @@ export function App() {
       try {
         await requestCodexThreadCreation({
           taskId: task.id,
+          projectId: task.projectId,
           identifier: task.identifier,
           instruction,
           skillName: "manage-taskboard",

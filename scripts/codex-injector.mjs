@@ -901,6 +901,11 @@ async function takePendingThreadContinuation() {
   return response.continuation ?? null;
 }
 
+async function takePendingThreadOpen() {
+  const response = await fetchJson(`${taskboardOrigin}/api/local/codex/thread-opens/next`);
+  return response.threadOpen ?? null;
+}
+
 async function takePendingThreadCreation() {
   const response = await fetchJson(`${taskboardOrigin}/api/local/codex/thread-creations/next`);
   return response.creation ?? null;
@@ -913,24 +918,65 @@ async function reportThreadCreationResult(requestId, result) {
   );
 }
 
-async function createTaskThreadViaCdp(cdp, request) {
+async function activateCodexProjectViaCdp(cdp, projectId, workspacePath) {
   await cdp.send("Page.bringToFront");
-  const workspace = await cdp.send("Runtime.evaluate", {
+  const activation = await cdp.send("Runtime.evaluate", {
     expression: `(async () => {
       const bridge = window.electronBridge;
       if (!bridge || typeof bridge.sendMessageFromView !== "function") return false;
       await bridge.sendMessageFromView({
         type: "electron-set-active-workspace-root",
-        root: ${JSON.stringify(request.workspacePath)},
+        root: ${JSON.stringify(workspacePath)},
       });
+      const row = Array.from(document.querySelectorAll(
+        "[data-app-action-sidebar-project-row]"
+      )).find((candidate) => (
+        candidate.getAttribute("data-app-action-sidebar-project-id") === ${JSON.stringify(projectId)}
+      ));
+      if (row?.getAttribute("data-app-action-sidebar-project-collapsed") === "true") {
+        row.click?.();
+        await new Promise((resolve) => window.setTimeout(resolve, 120));
+      }
+      row?.querySelector("[data-app-action-sidebar-select-project]")?.click?.();
       return true;
     })()`,
     awaitPromise: true,
     returnByValue: true,
   });
-  if (workspace.exceptionDetails || workspace.result.value !== true) {
+  if (activation.exceptionDetails || activation.result.value !== true) {
     throw new Error("Codex 无法切换到 Issue 的项目目录。下一步：确认该目录仍存在，然后重试。");
   }
+}
+
+async function waitForActiveCodexProjectViaCdp(cdp, projectId, timeoutMs = 8_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const active = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const activeThread = Array.from(document.querySelectorAll(
+          "[data-app-action-sidebar-thread-id]"
+        )).find((row) => row.getAttribute("data-app-action-sidebar-thread-active") === "true");
+        const threadProjectId = activeThread
+          ?.closest("[data-app-action-sidebar-project-list-id]")
+          ?.getAttribute("data-app-action-sidebar-project-list-id") || "";
+        const activeProject = document.querySelector(
+          '[data-app-action-sidebar-project-row][aria-current="page"], '
+          + '[data-app-action-sidebar-project-row][data-app-action-sidebar-project-active="true"]'
+        );
+        return threadProjectId
+          || activeProject?.getAttribute("data-app-action-sidebar-project-id")
+          || "";
+      })()`,
+      returnByValue: true,
+    });
+    if (active.result.value === projectId) return;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  throw new Error(`Codex did not activate project ${projectId}`);
+}
+
+async function createTaskThreadViaCdp(cdp, request) {
+  await activateCodexProjectViaCdp(cdp, request.projectId, request.workspacePath);
   const navigation = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       window.__codexTaskboardInjection__?.close();
@@ -947,18 +993,19 @@ async function createTaskThreadViaCdp(cdp, request) {
     throw new Error("Codex 无法打开新任务页面。下一步：重启 Codex 后重试。");
   }
   await prefillTaskComposerViaCdp(cdp, undefined, request);
+  await waitForActiveCodexProjectViaCdp(cdp, request.projectId);
 }
 
 function normalizeCodexThreadId(value) {
   return String(value || "").trim().replace(/^(?:local|cloud):/i, "");
 }
 
-async function navigateCodexThreadViaCdp(cdp, threadId) {
+async function navigateCodexThreadViaCdp(cdp, threadId, projectId, workspacePath) {
   const normalizedThreadId = normalizeCodexThreadId(threadId);
   if (!normalizedThreadId) throw new Error("Codex thread ID is required");
   const route = `/local/${encodeURIComponent(normalizedThreadId)}`;
 
-  await cdp.send("Page.bringToFront");
+  await activateCodexProjectViaCdp(cdp, projectId, workspacePath);
   const navigation = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       window.__codexTaskboardInjection__?.close();
@@ -982,25 +1029,36 @@ async function navigateCodexThreadViaCdp(cdp, threadId) {
           "[data-app-action-sidebar-thread-id]"
         )).find((row) => row.getAttribute("data-app-action-sidebar-thread-active") === "true");
         const activeThreadId = activeRow?.getAttribute("data-app-action-sidebar-thread-id") || "";
-        if (activeThreadId) return activeThreadId;
+        const activeProjectId = activeRow
+          ?.closest("[data-app-action-sidebar-project-list-id]")
+          ?.getAttribute("data-app-action-sidebar-project-list-id") || "";
+        if (activeThreadId) return { threadId: activeThreadId, projectId: activeProjectId };
         const source = (window.location.pathname || "")
           + (window.location.search || "")
           + (window.location.hash || "");
         const match = source.match(/(?:session|conversation|thread)(?:\\/|=|:|-)([A-Za-z0-9_.-]+)/i)
           || source.match(/\\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[/?#]|$)/)
           || source.match(/\\/([A-Za-z0-9_-]{24,})(?:[/?#]|$)/);
-        return match ? decodeURIComponent(match[1]) : "";
+        return { threadId: match ? decodeURIComponent(match[1]) : "", projectId: activeProjectId };
       })()`,
       returnByValue: true,
     });
-    if (normalizeCodexThreadId(location.result.value) === normalizedThreadId) return;
+    if (
+      normalizeCodexThreadId(location.result.value?.threadId) === normalizedThreadId
+      && location.result.value?.projectId === projectId
+    ) return;
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
   throw new Error(`Timed out while navigating to Codex thread ${threadId}`);
 }
 
 async function continueTaskThreadViaCdp(cdp, request) {
-  await navigateCodexThreadViaCdp(cdp, request.threadId);
+  await navigateCodexThreadViaCdp(
+    cdp,
+    request.threadId,
+    request.projectId,
+    request.workspacePath,
+  );
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
     const ready = await cdp.send("Runtime.evaluate", {
@@ -1028,30 +1086,53 @@ async function prefillPlainInstructionViaCdp(cdp, instruction) {
       )).find((candidate) => candidate.getClientRects().length > 0);
       if (!editor) return false;
       editor.focus();
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(editor);
-      selection?.removeAllRanges();
-      selection?.addRange(range);
       return true;
     })()`,
     returnByValue: true,
   });
   if (selected.result.value !== true) throw new Error("Codex composer is not available");
+  const selectAllModifier = process.platform === "darwin" ? 4 : 2;
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "a",
+    code: "KeyA",
+    modifiers: selectAllModifier,
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "a",
+    code: "KeyA",
+    modifiers: selectAllModifier,
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Backspace",
+    code: "Backspace",
+  });
+  await cdp.send("Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Backspace",
+    code: "Backspace",
+  });
   await cdp.send("Input.insertText", { text: instruction });
 
-  const verified = await cdp.send("Runtime.evaluate", {
-    expression: `(() => {
-      const instruction = ${JSON.stringify(instruction)};
-      const editor = Array.from(document.querySelectorAll(
-        '[data-codex-composer="true"][contenteditable="true"]'
-      )).find((candidate) => candidate.getClientRects().length > 0);
-      return Boolean(editor && (editor.textContent || '').includes(instruction));
-    })()`,
-    returnByValue: true,
-  });
-  if (verified.result.value !== true) throw new Error("Unable to write the issue instruction into Codex");
-  return { prefilled: true, skillMention: false };
+  const verificationDeadline = Date.now() + 2_000;
+  while (Date.now() < verificationDeadline) {
+    const verified = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const instruction = ${JSON.stringify(instruction)};
+        const editor = Array.from(document.querySelectorAll(
+          '[data-codex-composer="true"][contenteditable="true"]'
+        )).find((candidate) => candidate.getClientRects().length > 0);
+        const normalize = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+        return Boolean(editor && normalize(editor.innerText || editor.textContent).includes(normalize(instruction)));
+      })()`,
+      returnByValue: true,
+    });
+    if (verified.result.value === true) return { prefilled: true, skillMention: false };
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("Unable to write the issue instruction into Codex");
 }
 
 async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
@@ -1643,6 +1724,24 @@ async function main() {
       }
       const continuationConnection = injectedTargets.values().next().value;
       if (continuationConnection) {
+        try {
+          const threadOpen = await takePendingThreadOpen();
+          if (threadOpen) {
+            await navigateCodexThreadViaCdp(
+              continuationConnection,
+              threadOpen.threadId,
+              threadOpen.projectId,
+              threadOpen.workspacePath,
+            );
+            writeInjectorDiagnostic(
+              "thread-opened",
+              `threadId=${threadOpen.threadId} projectId=${threadOpen.projectId} workspacePath=${threadOpen.workspacePath}`,
+            );
+          }
+        } catch (error) {
+          writeInjectorDiagnostic("thread-open-error", error);
+          console.error(`Unable to open Codex thread: ${error.message}`);
+        }
         let creation = null;
         try {
           creation = await takePendingThreadCreation();
@@ -1651,7 +1750,7 @@ async function main() {
             await reportThreadCreationResult(creation.requestId, { ok: true });
             writeInjectorDiagnostic(
               "thread-creation-prepared",
-              `requestId=${creation.requestId} identifier=${creation.identifier}`,
+              `requestId=${creation.requestId} identifier=${creation.identifier} projectId=${creation.projectId} workspacePath=${creation.workspacePath}`,
             );
           }
         } catch (error) {

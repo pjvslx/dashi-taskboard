@@ -10,7 +10,7 @@ set "DATA_DIR=%REPO_DIR%.data"
 set "LOG_DIR=%DATA_DIR%\logs"
 set "LOG_FILE=%LOG_DIR%\start-codex-taskboard.log"
 set "CODEX_CLI_CONFIG=%DATA_DIR%\codex-cli-path.txt"
-set "DEFAULT_CODEX_CLI_EXE=C:\Users\Administrator\.codex\plugins\.plugin-appserver\codex.exe"
+set "DEFAULT_CODEX_CLI_EXE=%USERPROFILE%\.codex\plugins\.plugin-appserver\codex.exe"
 cd /d "%REPO_DIR%" || exit /b 1
 if not exist "%LOG_DIR%" mkdir "%LOG_DIR%" >nul 2>nul
 

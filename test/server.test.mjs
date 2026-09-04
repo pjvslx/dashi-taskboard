@@ -1186,6 +1186,8 @@ test("Codex thread continuation requests are broadcast to embedded clients", asy
   const payload = {
     taskId: "task-1",
     threadId: "thread-1",
+    projectId: "blockheads",
+    workspacePath: "D:/Sources/Codeup/blockheads",
     identifier: "DAS-123",
     instruction: "Address DAS-123 in Chinese.",
     skillName: "manage-taskboard",
@@ -1202,6 +1204,8 @@ test("Codex thread continuation requests are broadcast to embedded clients", asy
   const pending = await request(baseUrl, "/api/local/codex/thread-continuations/next");
   assert.equal(pending.response.status, 200);
   assert.equal(pending.body.continuation.threadId, payload.threadId);
+  assert.equal(pending.body.continuation.projectId, payload.projectId);
+  assert.equal(pending.body.continuation.workspacePath, payload.workspacePath);
   const empty = await request(baseUrl, "/api/local/codex/thread-continuations/next");
   assert.equal(empty.response.status, 200);
   assert.equal(empty.body.continuation, null);
@@ -1229,6 +1233,61 @@ test("Codex thread continuation requests reject incomplete payloads", async () =
   });
   assert.equal(result.response.status, 400);
   assert.equal(result.body.error.code, "INVALID_FIELD");
+});
+
+test("Codex thread open requests preserve the target project workspace", async () => {
+  const baseUrl = await startServer();
+  const payload = {
+    threadId: "thread-blockheads",
+    projectId: "a66aebf6-205f-4b5f-b2c6-b47a7cff7e88",
+    workspacePath: "D:/Sources/Codeup/blockheads",
+  };
+
+  const result = await request(baseUrl, "/api/local/codex/thread-opens", {
+    method: "POST",
+    body: payload,
+  });
+  assert.equal(result.response.status, 202);
+  assert.equal(result.body.accepted, true);
+
+  const pending = await request(baseUrl, "/api/local/codex/thread-opens/next");
+  assert.deepEqual(pending.body.threadOpen, payload);
+});
+
+test("Codex thread creation requests preserve the target project workspace", async () => {
+  const baseUrl = await startServer();
+  const payload = {
+    taskId: "task-blockheads",
+    projectId: "a66aebf6-205f-4b5f-b2c6-b47a7cff7e88",
+    identifier: "A66AEBF6205F-4",
+    instruction: "Address A66AEBF6205F-4 in Chinese.",
+    skillName: "manage-taskboard",
+    skillDisplayName: "Manage Taskboard",
+    skillPath: "D:/Sources/Github/dashi-taskboard/skills/manage-taskboard/SKILL.md",
+    workspacePath: "D:/Sources/Codeup/blockheads",
+  };
+
+  const creationResponse = request(baseUrl, "/api/local/codex/thread-creations", {
+    method: "POST",
+    body: payload,
+  });
+  let creation = null;
+  for (let attempt = 0; attempt < 20 && !creation; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const pending = await request(baseUrl, "/api/local/codex/thread-creations/next");
+    creation = pending.body.creation;
+  }
+  assert.ok(creation);
+  assert.equal(creation.projectId, payload.projectId);
+  assert.equal(creation.workspacePath, payload.workspacePath);
+
+  await request(baseUrl, `/api/local/codex/thread-creations/${creation.requestId}/result`, {
+    method: "POST",
+    body: { ok: true },
+  });
+  const result = await creationResponse;
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.prepared, true);
 });
 
 test("projects can be deleted with their local records", async () => {
