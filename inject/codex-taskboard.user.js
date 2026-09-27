@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.6.8";
+  const VERSION = "0.6.9";
   const SOURCE_HASH = window.__CODEX_TASKBOARD_SOURCE_HASH__;
   const SENTINEL_KEY = "__codexTaskboardInjection__";
   const DEFAULT_TASKBOARD_URL = "http://127.0.0.1:47823/?host=codex";
@@ -218,6 +218,12 @@
   }
 
   function findReferenceButton() {
+    const navigationRail = document.querySelector("[data-app-navigation-rail]");
+    const navigationReference = Array.from(
+      navigationRail?.querySelectorAll("button[data-sidebar-destination]") || [],
+    ).at(-1);
+    if (navigationReference?.parentElement) return navigationReference;
+
     const scroll = document.querySelector("[data-app-action-sidebar-scroll]");
     if (!scroll) return null;
     const buttons = Array.from(scroll.querySelectorAll("button"));
@@ -268,12 +274,15 @@
     button.removeAttribute("aria-expanded");
     button.removeAttribute("aria-controls");
     button.removeAttribute("aria-describedby");
+    button.removeAttribute("aria-current");
+    button.removeAttribute("data-selected");
+    button.removeAttribute("data-sidebar-destination");
     button.removeAttribute("data-state");
     button.setAttribute("aria-label", "打开任务面板");
     button.setAttribute("title", "任务面板");
     button.setAttribute(OWNED_ATTRIBUTE, "true");
     button.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
-    const label = button.querySelector(".text-fade-truncate")
+    const label = button.querySelector(".text-fade-truncate, .sr-only")
       || Array.from(button.querySelectorAll("span")).find((node) => buttonMatches(node, PLUGIN_LABELS));
     if (label) label.textContent = "任务面板";
     else button.textContent = "任务面板";

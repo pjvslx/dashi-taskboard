@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
 
 set "BASE_PORT=9231"
 set "PORT=%BASE_PORT%"
@@ -29,11 +29,11 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set "CODEX_APP_EXE="
+set "CODEX_APP_ID="
 set "CODEX_CLI_EXE=%DEFAULT_CODEX_CLI_EXE%"
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage OpenAI.Codex; if (-not $pkg) { exit 1 }; Join-Path $pkg.InstallLocation 'app\ChatGPT.exe'"`) do set "CODEX_APP_EXE=%%A"
-if "%CODEX_APP_EXE%"=="" (
-  echo ERROR: Could not find the installed Codex app package.
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage OpenAI.Codex | Sort-Object Version -Descending | Select-Object -First 1; if (-not $pkg) { exit 1 }; $manifest = Get-AppxPackageManifest $pkg; $app = @($manifest.Package.Applications.Application) | Where-Object { $_.Executable -match '(^|[\\/])ChatGPT\.exe$' } | Select-Object -First 1; if (-not $app) { exit 2 }; '{0}!{1}' -f $pkg.PackageFamilyName, $app.Id"`) do set "CODEX_APP_ID=%%A"
+if "%CODEX_APP_ID%"=="" (
+  echo ERROR: Could not find the installed Codex app identifier.
   echo See "%LOG_FILE%" for details.
   pause
   exit /b 1
@@ -112,9 +112,9 @@ echo Using Codex debug port %PORT%.
 echo selected debug port=%PORT%>> "%LOG_FILE%"
 
 echo Starting Codex with debug port %PORT%...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$exe = '%CODEX_APP_EXE%'; $args = @('--remote-debugging-port=%PORT%', '--remote-allow-origins=http://%CDP_HOST%:%PORT%'); Add-Content -Path '%LOG_FILE%' -Value ('starting: ' + $exe + ' ' + ($args -join ' ')); Start-Process -FilePath $exe -ArgumentList $args; exit 0"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_DIR%scripts\start-codex-app.ps1" -AppUserModelId "%CODEX_APP_ID%" -LaunchArguments "--remote-debugging-port=%PORT% --remote-allow-origins=http://%CDP_HOST%:%PORT%" -LogPath "%LOG_FILE%" >nul
 if errorlevel 1 (
-  echo ERROR: Could not start Codex from the installed Windows app package.
+  echo ERROR: Could not activate the installed Codex app package.
   echo See "%LOG_FILE%" for details.
   pause
   exit /b 1
